@@ -1,0 +1,54 @@
+# Merge with existing compose.yaml; --no-deps only these two new services.
+# Prepared template: deployment/capacity/token/permissions must be verified first.
+services:
+  pm-worker:
+    image: gujeuk-pm-worker:local
+    build:
+      context: ./pm-release
+      dockerfile: services/gujeuk_pm/Dockerfile
+    entrypoint: [python, -B]
+    environment:
+      PYTHONPATH: /release/src
+    command: [-m, oijwef098234.gujeuk_ai.runtime, worker, --state, /state, --collector, /collector/collector.py, --discord-state, /discord, --interval, '900']
+    user: '1000:1000'
+    restart: unless-stopped
+    cpus: 0.35
+    mem_limit: 768m
+    memswap_limit: 768m
+    pids_limit: 128
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ['/tmp:size=128m,mode=1777']
+    volumes:
+      - ./data/pm-workspace:/state
+      - ./data/pm-discord:/discord:ro
+      - ./pm-release/src:/release/src:ro
+      - ./pm-release/services/gujeuk_pm/collector.py:/collector/collector.py:ro
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: '2'}
+    networks: [pm]
+  collector:
+    image: gujeuk-pm-worker:local
+    entrypoint: [python, -B]
+    command: [/collector/collector.py, --guild, '1413450780068937790', --state, /state, --token-file, /run/secrets/discord_token, --interval, '120', --days, '30']
+    user: '1000:1000'
+    restart: unless-stopped
+    cpus: 0.15
+    mem_limit: 192m
+    memswap_limit: 192m
+    pids_limit: 32
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ./data/pm-discord:/state
+      - ./data/pm-discord-token:/run/secrets/discord_token:ro
+      - ./pm-release/services/gujeuk_pm/collector.py:/collector/collector.py:ro
+    tmpfs: ['/tmp:size=16m,mode=1777']
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: '2'}
+    networks: [pm]

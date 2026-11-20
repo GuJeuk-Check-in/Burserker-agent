@@ -1,0 +1,11 @@
+[Unit]
+Description=Analyze changed Gujeuk PM sources every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=15min
+RandomizedDelaySec=45
+Unit=gujeuk-pm-analysis.service
+
+[Install]
+WantedBy=timers.target

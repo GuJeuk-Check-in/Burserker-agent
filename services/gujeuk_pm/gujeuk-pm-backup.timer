@@ -1,0 +1,11 @@
+[Unit]
+Description=Gujeuk PM backup schedule
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+Unit=gujeuk-pm-backup.service
+
+[Install]
+WantedBy=timers.target

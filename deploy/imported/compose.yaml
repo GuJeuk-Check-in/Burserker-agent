@@ -1,0 +1,34 @@
+name: gujeuk-pm
+services:
+  hermes:
+    image: nousresearch/hermes-agent@sha256:667a9dc77f303f6cd6e9ff62ce2c9580563597e09dde07fe5a224375988d6209
+    container_name: gujeuk-pm-hermes
+    command: [gateway, run]
+    restart: unless-stopped
+
+    cpus: 0.75
+    mem_limit: 1536m
+    memswap_limit: 1536m
+    pids_limit: 256
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      HERMES_UID: "1000"
+      HERMES_GID: "1000"
+      HERMES_HOME: /opt/data
+      API_SERVER_ENABLED: "false"
+      HERMES_DASHBOARD: "0"
+    volumes:
+      - ./data:/opt/data
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - pm
+networks:
+  pm:
+    name: gujeuk-pm-net
+    driver: bridge

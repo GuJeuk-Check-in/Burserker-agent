@@ -1,0 +1,11 @@
+[Unit]
+Description=Gujeuk PM health schedule
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=5min
+RandomizedDelaySec=30
+Unit=gujeuk-pm-health.service
+
+[Install]
+WantedBy=timers.target

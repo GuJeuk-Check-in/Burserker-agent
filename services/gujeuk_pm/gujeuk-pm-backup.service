@@ -1,0 +1,13 @@
+[Unit]
+Description=Gujeuk PM private SQLite snapshots
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/gujeuk-pm
+ExecStart=/usr/bin/python3 /home/ubuntu/gujeuk-pm/maintenance/maintenance.py backup
+TimeoutStartSec=360
+StandardOutput=journal
+StandardError=journal

@@ -1,0 +1,5 @@
+name: gujeuk-pm
+version: "1.0.0"
+description: Owner-only Gujeuk collected evidence and approval-only workspace changes
+provides_tools:
+  - gujeuk_pm

@@ -1,0 +1,14 @@
+.git
+.venv
+.env*
+data
+wiki
+raw
+backups
+reports
+secrets
+.deploy
+**/__pycache__
+.pytest_cache
+*.db
+*.db-*

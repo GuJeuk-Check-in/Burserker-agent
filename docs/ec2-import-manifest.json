@@ -1,0 +1,135 @@
+{
+  "kind": "actual_deployed_source_snapshot_not_reconstructed_commit_history",
+  "files": [
+    {
+      "source": "compose.yaml",
+      "target": "deploy/imported/compose.yaml",
+      "sha256": "8b67cfe592eb0118f9cee4db46f69331a76f2b914da43b690c40d53b91f785e0"
+    },
+    {
+      "source": "compose.pm.yaml",
+      "target": "deploy/imported/compose.pm.yaml",
+      "sha256": "cc1d5f090e4c5fc1165c5c160785c8a5fe774e3adc28f60512b290f11b4b5952"
+    },
+    {
+      "source": "compose.notion.yaml",
+      "target": "deploy/imported/compose.notion.yaml",
+      "sha256": "07a245aa39cd9e8f40e43134f4bc4e4a22979676a66a11c81567f7b6460e8574"
+    },
+    {
+      "source": "setup.sh",
+      "target": "deploy/imported/setup.sh",
+      "sha256": "636418c5255b419292d7a5f883c5d4ee5002df40cc7e4c16ce31f8f9a294789c"
+    },
+    {
+      "source": "setup-discord.py",
+      "target": "deploy/imported/setup-discord.py",
+      "sha256": "7f91ec15008714b739062bc5e040099a4361e7e94ea736e1d3ec9d43c70089f5"
+    },
+    {
+      "source": "README.md",
+      "target": "deploy/imported/README.md",
+      "sha256": "39f109522e5c4b7bc33018a6a23937f0cc5514074cc788c740f0c68359839dd9"
+    },
+    {
+      "source": "pm-release/src/oijwef098234/gujeuk_ai/db.py",
+      "target": "src/oijwef098234/gujeuk_ai/db.py",
+      "sha256": "b16bfaea5625048be361d5074525288e34f599e4adce1ebcbe5cb797e5601e73"
+    },
+    {
+      "source": "pm-release/src/oijwef098234/gujeuk_ai/workspace.py",
+      "target": "src/oijwef098234/gujeuk_ai/workspace.py",
+      "sha256": "78bc6c108f37da530f1dc645f40794cb3dae562b540635def4a2d33d95ef50d4"
+    },
+    {
+      "source": "pm-release/src/oijwef098234/gujeuk_ai/sources.py",
+      "target": "src/oijwef098234/gujeuk_ai/sources.py",
+      "sha256": "1377b44b7c2f14d3a6dcaabc3191c0e05debb970207bee4d0e9ee6ac5c873590"
+    },
+    {
+      "source": "pm-release/src/oijwef098234/gujeuk_ai/runtime.py",
+      "target": "src/oijwef098234/gujeuk_ai/runtime.py",
+      "sha256": "945439b5f8ad8cbf18526de69dec1e1ddfdbef453bcf12fb6d5c7e7b970e05ea"
+    },
+    {
+      "source": "pm-release/src/oijwef098234/gujeuk_ai/inference.py",
+      "target": "src/oijwef098234/gujeuk_ai/inference.py",
+      "sha256": "cf3827184bfa06383ea40401d32c1df831454e103a2a5b304720787e6bedc74a"
+    },
+    {
+      "source": "pm-release/src/oijwef098234/gujeuk_ai/ops.py",
+      "target": "src/oijwef098234/gujeuk_ai/ops.py",
+      "sha256": "bd7e8b59ba0375ac9547290df0ccd5b4c0ff193f6baa769d4e01844bd00cf095"
+    },
+    {
+      "source": "pm-release/src/oijwef098234/gujeuk_ai/bridge.py",
+      "target": "src/oijwef098234/gujeuk_ai/bridge.py",
+      "sha256": "7e07fc8be4af88461633cc0cffdd88ca6b21a3d934d91ecd8a68a83100116f27"
+    },
+    {
+      "source": "pm-release/src/oijwef098234/gujeuk_ai/access.py",
+      "target": "src/oijwef098234/gujeuk_ai/access.py",
+      "sha256": "54bf6ea0a1ff62a6cc004a61792bf7f17dff8921b360f8624c7140e7421ad8df"
+    },
+    {
+      "source": "pm-release/src/oijwef098234/gujeuk_ai/notion_reader.py",
+      "target": "src/oijwef098234/gujeuk_ai/notion_reader.py",
+      "sha256": "1d162f9a7d5c4dbff338fb9406daf31b3dddd9ef74f17522a08705bbaf553755"
+    },
+    {
+      "source": "pm-release/services/gujeuk_pm/collector.py",
+      "target": "services/gujeuk_pm/collector.py",
+      "sha256": "d60eea566cf0a3ceb1075f29b3edf355edaef7242e95bcacbc4fed051feddc62"
+    },
+    {
+      "source": "data/plugins/gujeuk-pm/__init__.py",
+      "target": "services/gujeuk_pm/plugin/__init__.py",
+      "sha256": "ddc059e2f38c58d76f28ee8c5e383a2a26e74f03e60db7efe139ace2860f7418"
+    },
+    {
+      "source": "data/plugins/gujeuk-pm/plugin.yaml",
+      "target": "services/gujeuk_pm/plugin/plugin.yaml",
+      "sha256": "f24026b5d1b91a4d00c8843ae5a1b6b50f81d48692b784f8f4dae17d2bf91a0e"
+    },
+    {
+      "source": "data/skills/gujeuk-pm-operations/SKILL.md",
+      "target": "services/gujeuk_pm/agent-skill/SKILL.md",
+      "sha256": "45a872e065ca429983a72308df8aa3f8ec9447c4a8cc29a08a51788122347fad"
+    },
+    {
+      "source": "maintenance/maintenance.py",
+      "target": "services/gujeuk_pm/maintenance.py",
+      "sha256": "ec98d8c50d747dfb9bb7302350abf3dc01b5f1cacd9ffed740474cd1b89e8709"
+    },
+    {
+      "source": "maintenance/gujeuk-pm-analysis.service",
+      "target": "services/gujeuk_pm/gujeuk-pm-analysis.service",
+      "sha256": "40b8d207a028a2a858d5c281a3490c6fe2de129d104fa9cfafd54a687517ba1a"
+    },
+    {
+      "source": "maintenance/gujeuk-pm-analysis.timer",
+      "target": "services/gujeuk_pm/gujeuk-pm-analysis.timer",
+      "sha256": "4318f18a30e685bdb3dc8c99b25adf849269cbf1784c9c20a32fd087fc733546"
+    },
+    {
+      "source": "maintenance/gujeuk-pm-backup.service",
+      "target": "services/gujeuk_pm/gujeuk-pm-backup.service",
+      "sha256": "16c493f9940f2cccb409668d8df57021fd4077753a0aaff7d0267843309d165b"
+    },
+    {
+      "source": "maintenance/gujeuk-pm-backup.timer",
+      "target": "services/gujeuk_pm/gujeuk-pm-backup.timer",
+      "sha256": "ea76062f56f9ffe147093642e2c2300c6eb381e6847625f95ca2f8bc0d18281e"
+    },
+    {
+      "source": "maintenance/gujeuk-pm-health.service",
+      "target": "services/gujeuk_pm/gujeuk-pm-health.service",
+      "sha256": "766639d17cc768fa72eeca3beefa591224bef532d534393e02f7e16c43674bb8"
+    },
+    {
+      "source": "maintenance/gujeuk-pm-health.timer",
+      "target": "services/gujeuk_pm/gujeuk-pm-health.timer",
+      "sha256": "799430577e2097908fd08e8e35c856b1359d890c61c56059082e4af5796f8210"
+    }
+  ]
+}

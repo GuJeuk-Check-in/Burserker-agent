@@ -1,0 +1,31 @@
+name: gujeuk-pm-notion-read
+services:
+  notion-reader:
+    container_name: gujeuk-pm-notion-reader
+    image: ${BURSERKER_WORKER_IMAGE:-gujeuk-pm-worker:local}
+    entrypoint: [python, -B]
+    command: [-m, oijwef098234.gujeuk_ai.notion_reader, --state, /requests]
+    environment:
+      PYTHONPATH: /release/src
+    user: '1000:1000'
+    restart: unless-stopped
+    cpus: 0.4
+    mem_limit: 768m
+    memswap_limit: 768m
+    pids_limit: 128
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ['/tmp:size=128m,mode=1777']
+    volumes:
+      - ${BURSERKER_CODE:?set BURSERKER_CODE}/src:/release/src:ro
+      - ./data/pm-workspace/notion-read:/requests
+    networks: [pm]
+    logging:
+      driver: json-file
+      options: {max-size: 3m, max-file: '2'}
+networks:
+  pm:
+    external: true
+    name: gujeuk-pm-net

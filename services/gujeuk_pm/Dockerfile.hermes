@@ -1,0 +1,6 @@
+FROM nousresearch/hermes-agent@sha256:667a9dc77f303f6cd6e9ff62ce2c9580563597e09dde07fe5a224375988d6209
+USER root
+COPY services/gujeuk_pm/concurrency.py /opt/hermes/burserker_concurrency.py
+COPY services/gujeuk_pm/hermes_patches.py services/gujeuk_pm/discord_mentions.py /opt/burserker-patches/
+RUN /opt/hermes/.venv/bin/python /opt/burserker-patches/hermes_patches.py --root /opt/hermes
+# Preserve the official image's entrypoint and its supervised gateway startup.

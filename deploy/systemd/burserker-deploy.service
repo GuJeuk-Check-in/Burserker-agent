@@ -1,0 +1,10 @@
+[Unit]
+Description=Deploy CI-verified Burserker main without touching service data
+After=docker.service network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/gujeuk-pm/code
+ExecStart=/usr/bin/python3 /home/ubuntu/gujeuk-pm/code/scripts/pull_deploy.py
+TimeoutStartSec=1000

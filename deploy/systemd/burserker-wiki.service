@@ -1,0 +1,8 @@
+[Unit]
+Description=Compile source-linked private Burserker LLM wiki
+After=docker.service
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/usr/bin/docker exec --user hermes -e HOME=/opt/data -e PYTHONPATH=/opt/data/workspace/gujeuk-pm/src:/opt/hermes:/opt/hermes/.venv/lib/python3.14/site-packages gujeuk-pm-hermes /opt/hermes/.venv/bin/python -B -m oijwef098234.gujeuk_ai.wiki --state /opt/data/pm-workspace --once --batch 8
+TimeoutStartSec=210

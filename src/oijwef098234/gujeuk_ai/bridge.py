@@ -20,6 +20,7 @@ def invoke(params, *, runner=subprocess.run):
                 result['cache'] = _rpc({'op': 'record_notion_read', 'data': result}, runner)
             except ValueError:
                 result['cache_error'] = 'cache_not_updated'
+        result.pop('discovered_urls', None)
         return {'ok': True, 'result': result, 'untrusted_source_content': True}
     if op == 'tasks':
         request = {'op': 'snapshot'}

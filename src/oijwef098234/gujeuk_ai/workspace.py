@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import asdict
 import hashlib
 import json
+import re
 import sqlite3
 from .db import Store, validate
 from .sources import now, notion_url, GITHUB_ORG
@@ -137,6 +138,9 @@ class Workspace(Store):
 
     def due_notion(self):
         import time
+        cooldown = self.db.execute("SELECT value FROM workspace_meta WHERE key='notion_host_retry'").fetchone()
+        if cooldown and float(cooldown[0]) > time.time():
+            return None
         row = self.db.execute('SELECT url FROM notion_frontier WHERE next_try<=? ORDER BY checked IS NOT NULL,checked,url LIMIT 1',
             (time.time(),)).fetchone()
         return row[0] if row else None
@@ -148,17 +152,42 @@ class Workspace(Store):
         coverage = result.get('coverage', {'kind': 'notion', 'issues': [result.get('error', 'reader_failed')]})
         if docs:
             self.ingest({'documents': docs, 'coverage': coverage})
-        self.schedule_notion([url] + [link['url'] for d in docs for link in d.get('links', [])])
+        self.schedule_notion([url] + result.get('discovered_urls', []) + [link['url'] for d in docs for link in d.get('links', [])])
         ok = bool(docs) and not any(d.get('content_truncated') for d in docs)
+        errors = coverage.get('issues', [])
+        reason = 'source_incomplete_or_failed'
+        if errors:
+            first = errors[0]
+            reason = str(first.get('error') or first.get('reason') or 'reader_failed') if isinstance(first, dict) else str(first)
+            if isinstance(first, dict) and first.get('status'):
+                reason += ':' + str(first['status'])
+        elif result.get('error'):
+            reason = str(result['error'])
+        if not re.fullmatch('[A-Za-z0-9_:-]{1,100}', reason):
+            reason = 'reader_failed'
         with self.db:
+            blocked = [e for e in errors if isinstance(e, dict) and e.get('status') == 429]
+            if blocked:
+                retry = max(time.time() + 900, max(float(e.get('retry_at') or 0) for e in blocked))
+                self.db.execute("INSERT OR REPLACE INTO workspace_meta VALUES('notion_host_retry',?)", (str(retry),))
             self.db.execute('UPDATE notion_frontier SET state=?,next_try=?,checked=?,error=? WHERE url=?',
                 ('read' if ok else 'failed', time.time() + (3600 if ok else 900), time.time(),
-                 '' if ok else 'source_incomplete_or_failed', url))
+                 '' if ok else reason, url))
         return {'cached_documents': len(docs), 'frontier': self.notion_frontier_status()}
 
     def notion_frontier_status(self):
         counts = dict(self.db.execute('SELECT state,count(*) FROM notion_frontier GROUP BY state'))
-        return {'known_pages': sum(counts.values()), 'states': counts, 'discoverability_complete': False}
+        failures = dict(self.db.execute("SELECT error,count(*) FROM notion_frontier WHERE state='failed' GROUP BY error"))
+        return {'known_pages': sum(counts.values()), 'states': counts, 'failures': failures, 'discoverability_complete': False}
+
+    def seed_notion_cache(self):
+        if self.db.execute("SELECT 1 FROM workspace_meta WHERE key='notion_frontier_seeded'").fetchone():
+            return
+        for row in self.db.execute("SELECT data FROM documents WHERE kind='notion'"):
+            data = json.loads(row[0])
+            self.schedule_notion([data['url']] + [link['url'] for link in data.get('links', [])])
+        with self.db:
+            self.db.execute("INSERT INTO workspace_meta VALUES('notion_frontier_seeded','1')")
 
     def snapshot(self):
         return {'protocol': 1, 'workspace': 'gujeuk-server', 'observed_at': now(),

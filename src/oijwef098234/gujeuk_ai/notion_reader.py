@@ -16,7 +16,7 @@ import uuid
 
 from .sources import NOTION_ROOT, collect_notion, notion_url
 
-MAX_RESPONSE = 512 * 1024
+MAX_RESPONSE = 2 * 1024 * 1024
 NAME = re.compile(r'[0-9a-f]{32}\.request\.json')
 
 

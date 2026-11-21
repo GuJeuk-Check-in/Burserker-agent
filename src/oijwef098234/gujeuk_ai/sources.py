@@ -103,7 +103,11 @@ def collect_notion(url=NOTION_ROOT, *, max_pages=40, reader=None, start=0, max_s
                     budget = lambda: max(1, min(45000, int((deadline - time.monotonic()) * 1000)))
                     response = page.goto(target, wait_until="domcontentloaded", timeout=budget())
                     if response is None or response.status >= 400:
-                        raise SourceHTTPError(response.status if response else 0)
+                        retry_at = 0
+                        if response and response.status == 429:
+                            retry = str(response.headers.get('retry-after', '900'))
+                            retry_at = time.time() + (min(86400, max(1, int(retry))) if retry.isdigit() else 900)
+                        raise SourceHTTPError(response.status if response else 0, retry_at)
                     page.wait_for_function("""() =>
                         document.querySelector('.notion-page-content, .notion-collection-view') &&
                         document.title.trim() && document.title.trim() !== 'Notion' &&
@@ -174,10 +178,12 @@ def collect_notion(url=NOTION_ROOT, *, max_pages=40, reader=None, start=0, max_s
             except Exception as error:
                 issues.append({"url": target, "error": type(error).__name__,
                     'status': getattr(error, 'status', None),
+                    'retry_at': getattr(error, 'retry_at', 0),
                     'reason': str(error) if str(error) in {'notion_shell_or_denied', 'credential_shaped_content_excluded'} else ''})
                 if getattr(error, 'status', None) == 429:
                     break  # Never hammer the remaining pages after a rate limit.
-        return {"documents": docs, "coverage": {"kind": "notion", "checked": now(),
+        return {"documents": docs, "discovered_urls": sorted(set(queue) | visited)[:5000],
+                "coverage": {"kind": "notion", "checked": now(),
                 "visited": len(visited), "remaining_links": len(set(queue) - visited), "issues": issues,
                 'time_budget_exhausted': bool(queue) and time.monotonic() >= deadline,
                 "complete": False, "limits": ["공개 페이지 DOM만 읽어요", "DB 필터·숨김 속성·페이지네이션·첨부 전체 수집은 보장하지 않아요",

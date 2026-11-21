@@ -24,12 +24,24 @@ class Workspace(Store):
             CREATE TABLE IF NOT EXISTS collection_status(kind TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS model_runs(digest TEXT PRIMARY KEY, created TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY, digest TEXT NOT NULL, result TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS notion_frontier(
+                url TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'pending',
+                next_try REAL NOT NULL DEFAULT 0, checked REAL, error TEXT NOT NULL DEFAULT '');
+            CREATE TABLE IF NOT EXISTS workspace_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
         """)
+        if not self.db.execute("SELECT 1 FROM workspace_meta WHERE key='document_digest_v2'").fetchone():
+            with self.db:
+                for row in self.db.execute('SELECT kind,id,data FROM documents'):
+                    data = json.loads(row[2])
+                    stable = {k: data.get(k) for k in ('kind', 'id', 'url', 'title', 'content', 'author_id', 'revision')}
+                    digest = hashlib.sha256(json.dumps(stable, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+                    self.db.execute('UPDATE documents SET digest=? WHERE kind=? AND id=?', (digest,row[0],row[1]))
+                self.db.execute("INSERT INTO workspace_meta VALUES('document_digest_v2','1')")
 
     def ingest(self, snapshot):
         rows, coverage = snapshot['documents'], snapshot['coverage']
         kind = coverage['kind']
-        if kind not in {'notion', 'github', 'discord', 'analysis'} or len(rows) > 1000:
+        if kind not in {'notion', 'github', 'discord', 'figma', 'analysis'} or len(rows) > 1000:
             raise ValueError('invalid source snapshot')
         coverage = dict(coverage)
         if kind != 'analysis':
@@ -44,7 +56,8 @@ class Workspace(Store):
                 raw = json.dumps(row, ensure_ascii=False)
                 if len(raw) > 100000:
                     raise ValueError('document too large')
-                digest = hashlib.sha256(row['content'].encode()).hexdigest()
+                stable = {k: row.get(k) for k in ('kind', 'id', 'url', 'title', 'content', 'author_id', 'revision')}
+                digest = hashlib.sha256(json.dumps(stable, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
                 self.db.execute('INSERT OR REPLACE INTO documents VALUES(?,?,?,?)',
                                 (kind, row['id'], raw, digest))
             self.db.execute('INSERT OR REPLACE INTO collection_status VALUES(?,?)',
@@ -59,6 +72,9 @@ class Workspace(Store):
             except ValueError:
                 return False
         p = urlparse(url)
+        if kind == 'figma':
+            from .figma import FILE_KEY
+            return p.scheme == 'https' and p.netloc == 'www.figma.com' and p.path == '/design/' + FILE_KEY
         if kind == 'github':
             return p.scheme == 'https' and p.netloc == 'github.com' and p.path.startswith('/' + GITHUB_ORG + '/')
         parts = p.path.strip('/').split('/')
@@ -71,7 +87,7 @@ class Workspace(Store):
         from itertools import zip_longest
         groups = [[json.loads(r[0]) for r in self.db.execute(
             "SELECT data FROM documents WHERE kind=? ORDER BY json_extract(data,'$.observed_at') DESC,id LIMIT ?",
-            (kind, limit))] for kind in ('notion', 'discord', 'github')]
+            (kind, limit))] for kind in ('notion', 'discord', 'github', 'figma')]
         return [row for group in zip_longest(*groups) for row in group if row is not None][:limit]
 
     def coverage(self):
@@ -83,7 +99,7 @@ class Workspace(Store):
         return {'workspace': 'gujeuk-server', 'checked': now(), 'notion_writes': False,
                 'sources': {kind: {'documents': counts.get(kind, 0),
                     'coverage': coverage.get(kind, {'issues': ['not_collected']})}
-                    for kind in ('notion', 'discord', 'github')},
+                    for kind in ('notion', 'discord', 'github', 'figma')},
                 'analysis': coverage.get('analysis'), 'tasks': len(self.items()),
                 'pending_proposals': len(self.proposals())}
 
@@ -103,7 +119,7 @@ class Workspace(Store):
 
     def search_documents(self, query='', kind='', limit=10):
         if (not isinstance(query, str) or len(query) > 400
-                or kind not in {'', 'notion', 'discord', 'github'}
+                or kind not in {'', 'notion', 'discord', 'github', 'figma'}
                 or type(limit) is not int or not 1 <= limit <= 20):
             raise ValueError('invalid source query')
         escaped = query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
@@ -113,6 +129,36 @@ class Workspace(Store):
             ORDER BY json_extract(data,'$.observed_at') DESC,id LIMIT ?""",
             (kind, kind, '%' + escaped + '%', '%' + escaped + '%', limit))
         return [json.loads(row[0]) for row in rows]
+
+    def schedule_notion(self, urls):
+        with self.db:
+            for url in urls:
+                self.db.execute('INSERT OR IGNORE INTO notion_frontier(url) VALUES(?)', (notion_url(url),))
+
+    def due_notion(self):
+        import time
+        row = self.db.execute('SELECT url FROM notion_frontier WHERE next_try<=? ORDER BY checked IS NOT NULL,checked,url LIMIT 1',
+            (time.time(),)).fetchone()
+        return row[0] if row else None
+
+    def record_notion_read(self, result):
+        import time
+        url = notion_url(result['requested_url'])
+        docs = result.get('documents', [])
+        coverage = result.get('coverage', {'kind': 'notion', 'issues': [result.get('error', 'reader_failed')]})
+        if docs:
+            self.ingest({'documents': docs, 'coverage': coverage})
+        self.schedule_notion([url] + [link['url'] for d in docs for link in d.get('links', [])])
+        ok = bool(docs) and not any(d.get('content_truncated') for d in docs)
+        with self.db:
+            self.db.execute('UPDATE notion_frontier SET state=?,next_try=?,checked=?,error=? WHERE url=?',
+                ('read' if ok else 'failed', time.time() + (3600 if ok else 900), time.time(),
+                 '' if ok else 'source_incomplete_or_failed', url))
+        return {'cached_documents': len(docs), 'frontier': self.notion_frontier_status()}
+
+    def notion_frontier_status(self):
+        counts = dict(self.db.execute('SELECT state,count(*) FROM notion_frontier GROUP BY state'))
+        return {'known_pages': sum(counts.values()), 'states': counts, 'discoverability_complete': False}
 
     def snapshot(self):
         return {'protocol': 1, 'workspace': 'gujeuk-server', 'observed_at': now(),
@@ -138,6 +184,8 @@ class Workspace(Store):
             if not isinstance(data, dict) or set(data) - {'query', 'kind', 'limit'}:
                 raise ValueError('invalid source query')
             return self.search_documents(**data)
+        if op == 'record_notion_read':
+            return self.record_notion_read(data)
         key = request.get('id', '')
         if not isinstance(key, str) or not 1 <= len(key) <= 200 or not isinstance(data, dict):
             raise ValueError('request id required')

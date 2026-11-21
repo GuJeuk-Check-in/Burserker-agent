@@ -8,7 +8,9 @@ def register(ctx):
         'name': 'gujeuk_pm',
         'description': (
             '구즉 업무 자료를 실제 조회해요. 연결 안 됐다고 답하기 전에 status로 수집 상태를 확인하세요. '
-            'tasks는 앱 태스크, search는 수집한 Notion/Discord/GitHub 원문 키워드 검색이에요. '
+            'tasks는 앱 태스크, search는 수집한 Notion/Discord/GitHub/Figma 원문 키워드 검색이에요. '
+            'wiki_search는 출처가 있는 누적 업무·인물·명시적 업무/소통 선호 위키 검색, wiki_status는 처리/미처리/실패 수예요. '
+            '업무/인물 질문은 wiki_search와 원문 search를 함께 확인하고, 인물 성격/민감정보를 추측하지 마세요. '
             'read_notion은 공개 팀 Notion URL을 지금 직접 읽고 본문과 제목 있는 하위 links를 반환해요. '
             'url을 생략하면 자료실 시작점을 읽어요. 문서 위치/명세서 질문에는 read_notion으로 '
             '시작점을 읽고 반환된 links 중 해당 기능/API 문서 URL을 다시 read_notion으로 열어요. '
@@ -27,10 +29,10 @@ def register(ctx):
         'parameters': {
             'type': 'object', 'additionalProperties': False,
             'properties': {
-                'op': {'type': 'string', 'enum': ['status', 'tasks', 'search', 'read_notion', 'create', 'propose']},
+                'op': {'type': 'string', 'enum': ['status', 'tasks', 'search', 'read_notion', 'wiki_search', 'wiki_status', 'create', 'propose']},
                 'url': {'type': 'string', 'description': 'read_notion용 공개 magical-sovereign-7b8.notion.site 페이지 URL'},
                 'query': {'type': 'string'},
-                'kind': {'type': 'string', 'enum': ['', 'notion', 'discord', 'github']},
+                'kind': {'type': 'string', 'enum': ['', 'notion', 'discord', 'github', 'figma']},
                 'request_id': {'type': 'string'},
                 'data': {'type': 'object', 'additionalProperties': True},
             }, 'required': ['op'],

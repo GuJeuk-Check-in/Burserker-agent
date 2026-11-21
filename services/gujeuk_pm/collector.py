@@ -102,6 +102,8 @@ class Store:
                 created TEXT, edited TEXT, content TEXT, attachments INTEGER,
                 url TEXT NOT NULL, observed REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS message_polls(message_id TEXT PRIMARY KEY, data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS message_details(message_id TEXT PRIMARY KEY, data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS history_backfill(channel TEXT PRIMARY KEY, before_id TEXT NOT NULL, complete INTEGER NOT NULL DEFAULT 0);
         """)
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO settings VALUES('guild',?)", (guild,))
@@ -163,6 +165,12 @@ class Store:
                                     (ident, json.dumps(value, ensure_ascii=False)))
                 else:
                     self.db.execute('DELETE FROM message_polls WHERE message_id=?', (ident,))
+                details = {'author_name': m.get('author', {}).get('global_name') or m.get('author', {}).get('username', ''),
+                    'attachments': [{k:a.get(k) for k in ('id','filename','content_type','size','url','description')}
+                        for a in m.get('attachments', [])],
+                    'embeds': m.get('embeds', []), 'stickers': m.get('sticker_items', [])}
+                self.db.execute('INSERT OR REPLACE INTO message_details VALUES(?,?)',
+                    (ident, json.dumps(details, ensure_ascii=False)))
             if advance and messages:
                 cursor = str(max([int(old)] + [int(m["id"]) for m in messages]))
                 self.db.execute("UPDATE channels SET cursor=? WHERE id=?", (cursor, channel))
@@ -171,8 +179,29 @@ class Store:
         with self.db:
             self.db.execute("UPDATE channels SET status=?,checked=? WHERE id=?", (status, time.time(), channel))
 
+    def enable_all_history(self):
+        with self.db:
+            self.db.execute("INSERT OR REPLACE INTO settings VALUES('all_history','1')")
+
+    def history_cursor(self, channel):
+        enabled = self.db.execute("SELECT value FROM settings WHERE key='all_history'").fetchone()
+        if not enabled:
+            return None
+        seed = str(self.initial_after())
+        with self.db:
+            self.db.execute('INSERT OR IGNORE INTO history_backfill(channel,before_id) VALUES(?,?)', (channel, seed))
+        row = self.db.execute('SELECT before_id,complete FROM history_backfill WHERE channel=?', (channel,)).fetchone()
+        return None if row[1] else row[0]
+
+    def history_advance(self, channel, before, complete):
+        with self.db:
+            self.db.execute('UPDATE history_backfill SET before_id=?,complete=? WHERE channel=?', (before, int(complete), channel))
+
     def status(self):
         return {"guild": self.guild,
+                'older_history_remaining': self.db.execute('SELECT count(*) FROM history_backfill WHERE complete=0').fetchone()[0]
+                    if self.db.execute("SELECT 1 FROM sqlite_master WHERE name='history_backfill'").fetchone() else None,
+                'messages_with_attachments': self.db.execute('SELECT count(*) FROM messages WHERE attachments>0').fetchone()[0],
                 "messages": self.db.execute("SELECT count(*) FROM messages").fetchone()[0],
                 "empty_content_messages": self.db.execute("SELECT count(*) FROM messages WHERE content='' ").fetchone()[0],
                 "channels": [{"id": r[0], "type": r[1], "status": r[2], "checked": r[3]}
@@ -192,7 +221,10 @@ class Store:
         select = ('SELECT m.*,c.name AS channel_name,pc.name AS parent_name,'
                   + ('p.data' if exists else 'NULL') + ' AS poll FROM messages m '
                   'LEFT JOIN channels c ON c.id=m.channel LEFT JOIN channels pc ON pc.id=c.parent')
-        return select + (' LEFT JOIN message_polls p ON p.message_id=m.id' if exists else '')
+        details = self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='message_details'").fetchone()
+        select = select.replace(' AS poll FROM', ' AS poll,' + ('md.data' if details else 'NULL') + ' AS details FROM')
+        return select + (' LEFT JOIN message_polls p ON p.message_id=m.id' if exists else '') + (
+            ' LEFT JOIN message_details md ON md.message_id=m.id' if details else '')
 
     @staticmethod
     def _decode_messages(rows):
@@ -200,6 +232,7 @@ class Store:
         for row in rows:
             value = dict(row)
             value['poll'] = json.loads(value['poll']) if value['poll'] is not None else None
+            value['details'] = json.loads(value['details']) if value['details'] is not None else {}
             result.append(value)
         return result
 
@@ -253,7 +286,7 @@ class Collector:
     def tick(self):
         guild = self.store.guild
         coverage = {"guild": guild, "checked": time.time(), "issues": [],
-                    "limits": ["initial history: configured horizon (default 30 days)",
+                    "limits": ["recent history plus opt-in durable backwards full-history backfill",
                                "polling: deletions and edits outside newest 100 not tracked",
                                "no audio transcription or attachment download",
                                "private threads: joined/accessible only; old archive discovery is bounded",
@@ -329,6 +362,17 @@ class Collector:
                 seed = self.store.initial_after()
                 self.store.save_page(ident, [m for m in recent if int(m["id"]) > seed], advance=False)
                 self.store.mark(ident, "caught_up" if caught_up else "catching_up")
+                before = self.store.history_cursor(ident)
+                for _ in range(self.max_pages if before is not None else 0):
+                    history = self.api.get(f'/channels/{ident}/messages', before=before, limit=100)
+                    if history and any(int(m['id']) >= int(before) for m in history):
+                        raise ValueError('non-advancing history page')
+                    self.store.save_page(ident, history, advance=False)
+                    before = str(min(int(m['id']) for m in history)) if history else before
+                    complete = len(history) < 100
+                    self.store.history_advance(ident, before, complete)
+                    if complete:
+                        break
             except APIError as error:
                 self.store.mark(ident, f"http_{error.status}")
                 coverage["issues"].append({"scope": f"messages:{ident}", "status": error.status})
@@ -344,6 +388,7 @@ def main():
     parser.add_argument("--state", type=Path, required=True)
     parser.add_argument("--token-file", type=Path)
     parser.add_argument("--days", type=int, default=30)
+    parser.add_argument('--all-history', action='store_true', help='기존 최근 수집을 보존하며 더 오래된 모든 메시지를 역방향으로 이어서 수집해요')
     parser.add_argument("--interval", type=int, default=120)
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--status", action="store_true")
@@ -353,6 +398,8 @@ def main():
         parser.error("invalid bounds")
     os.umask(0o077)
     store = Store(args.state, args.guild, args.days)
+    if args.all_history:
+        store.enable_all_history()
     if args.status or args.recent:
         print(json.dumps(store.recent(args.recent) if args.recent else store.status(), ensure_ascii=False))
         return

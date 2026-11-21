@@ -12,7 +12,7 @@ import sys
 import time
 
 from .sources import collect_notion, collect_github, document, now
-from .workspace import Workspace
+from .wiki import WikiWorkspace as Workspace
 
 
 def model_prompt(store, documents):
@@ -84,8 +84,12 @@ def discord_snapshot(collector_path, state, cursor=None):
                     content = ('Discord 투표 · 수집 시점의 집계예요. 후보는 확정 일정이 아니며, '
                         '복수선택 득표수 합계는 참석 인원이 아니에요. null은 미확인이고 0표가 아니에요.\n'
                         + json.dumps(poll, ensure_ascii=False) + '\n' + content)
+                details = row.get('details') or {}
+                if details.get('attachments') or details.get('embeds') or details.get('stickers'):
+                    content += '\n메시지 부가 정보(첨부 본문/음성은 미독해):\n' + json.dumps(details, ensure_ascii=False)
                 documents.append(document('discord', row['id'], row['url'], title,
                     content, created_at=row['created'], author_id=row['author'], poll=poll,
+                    author_name=details.get('author_name', ''), content_truncated=len(content)>24000,
                     poll_observed_at=row['observed'] if poll else None))
             except ValueError:
                 excluded.append({'id': row['id'], 'reason': 'credential_shaped_content_excluded'})
@@ -102,9 +106,9 @@ def discord_snapshot(collector_path, state, cursor=None):
         source.db.close()
 
 
-def tick(store, *, notion=collect_notion, github=collect_github, discord=None, engine=None):
+def tick(store, *, notion=collect_notion, github=collect_github, discord=None, figma=None, engine=None):
     results = {}
-    for kind, fetch in [('notion', notion), ('github', github), ('discord', discord)]:
+    for kind, fetch in [('discord', discord), ('notion', notion), ('github', github), ('figma', figma)]:
         if fetch is None:
             continue
         try:
@@ -176,8 +180,11 @@ def main():
                     raise RuntimeError('low_disk')
                 if store.path.stat().st_size > 512 * 1024 ** 2:
                     raise RuntimeError('workspace_size_limit')
-                result = tick(store, notion=lambda: collect_notion(start=count * 17),
+                from .notion_frontier import crawl
+                from .figma import collect_figma
+                result = tick(store, notion=lambda: crawl(store, args.state),
                     github=lambda: collect_github(start=store.coverage().get('github', {}).get('next_start', 0)),
+                    figma=lambda: collect_figma(start=store.coverage().get('figma', {}).get('next_start', 0)),
                     discord=(lambda: discord_snapshot(args.collector, args.discord_state,
                              store.coverage().get('discord', {}).get('cursor')))
                     if args.collector and args.discord_state else None, engine=engine)

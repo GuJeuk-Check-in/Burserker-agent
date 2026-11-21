@@ -41,7 +41,8 @@ def notion_url(url):
         if not re.fullmatch(r'[a-f0-9]{32}', selected):
             raise ValueError('invalid selected Notion page')
         suffix = '?' + urlencode({'p': selected, 'pm': 's'})
-    return f"https://{root.netloc}/{path_id}" + suffix
+    # Preserve the actual published slug. Dropping it invents a different URL.
+    return f"https://{root.netloc}{parsed.path.rstrip('/')}" + suffix
 
 
 def safe_path(path):
@@ -110,11 +111,29 @@ def collect_notion(url=NOTION_ROOT, *, max_pages=40, reader=None, start=0, max_s
                     """, timeout=min(25000, budget()))
                     notion_url(page.url)  # Reject a login or off-site redirect.
                     page.wait_for_timeout(1500)
-                    for _ in range(3):
-                        page.mouse.wheel(0, 1800)
-                        page.wait_for_timeout(300)
-                    return (page.title(), page.locator("body").inner_text(),
-                            page.locator("a[href]").evaluate_all("xs=>xs.map(x=>({url:x.href,title:x.innerText.slice(0,200)}))"))
+                    texts, discovered, previous, stable = [], {}, None, 0
+                    # Collect each visible slice BEFORE virtualized rows disappear.
+                    for _ in range(40):
+                        visible = page.locator('body').inner_text()
+                        if visible not in texts:
+                            texts.append(visible)
+                        for link in page.locator('a[href]').evaluate_all('xs=>xs.map(x=>({url:x.href,title:x.innerText.slice(0,200)}))'):
+                            discovered[link['url']] = link
+                        position = page.evaluate('''() => {
+                            let candidates = [...document.querySelectorAll('*')].filter(x =>
+                                x.clientHeight > 200 && x.scrollHeight > x.clientHeight + 20 &&
+                                /auto|scroll/.test(getComputedStyle(x).overflowY));
+                            let el = candidates.sort((a,b)=>b.clientHeight-a.clientHeight)[0] || document.scrollingElement;
+                            el.scrollTop += Math.max(500, el.clientHeight * .8);
+                            return [el.scrollTop, el.scrollHeight, el.clientHeight];
+                        }''')
+                        marker = (tuple(position), len(discovered), len(visible))
+                        stable = stable + 1 if marker == previous else 0
+                        previous = marker
+                        if stable >= 3 or time.monotonic() >= deadline - 2:
+                            break
+                        page.wait_for_timeout(200)
+                    return page.title(), '\n\n'.join(texts), list(discovered.values())
                 finally:
                     if browser.is_connected():
                         context.close()
@@ -141,8 +160,13 @@ def collect_notion(url=NOTION_ROOT, *, max_pages=40, reader=None, start=0, max_s
                         child_links.append({'url': child, 'title': str(link.get('title', ''))[:200] if isinstance(link, dict) else ''})
                     if child not in visited and child not in queue and child not in candidates:
                         candidates.append(child)
-                docs.append(document("notion", page_id(target), target, title, body, links=child_links,
-                                     content_truncated=len(body) > 24000))
+                if len(body) > 100000:
+                    issues.append({'url': target, 'reason': 'rendered_text_budget_exceeded'})
+                for offset in range(0, min(len(body), 100000), 18000):
+                    ident = page_id(target) + (':' + str(offset) if offset else '')
+                    docs.append(document('notion', ident, target, title, body[offset:offset+18000],
+                        links=child_links if offset == 0 else [], content_truncated=len(body) > 100000,
+                        chunk_offset=offset, rendered_characters=len(body)))
                 if target == root and candidates:
                     offset = start % len(candidates)
                     candidates = candidates[offset:] + candidates[:offset]
@@ -151,6 +175,8 @@ def collect_notion(url=NOTION_ROOT, *, max_pages=40, reader=None, start=0, max_s
                 issues.append({"url": target, "error": type(error).__name__,
                     'status': getattr(error, 'status', None),
                     'reason': str(error) if str(error) in {'notion_shell_or_denied', 'credential_shaped_content_excluded'} else ''})
+                if getattr(error, 'status', None) == 429:
+                    break  # Never hammer the remaining pages after a rate limit.
         return {"documents": docs, "coverage": {"kind": "notion", "checked": now(),
                 "visited": len(visited), "remaining_links": len(set(queue) - visited), "issues": issues,
                 'time_budget_exhausted': bool(queue) and time.monotonic() >= deadline,

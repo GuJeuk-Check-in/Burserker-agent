@@ -5,6 +5,7 @@ This is a reporting-policy probe, not a complete Discord end-to-end test.
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 from oijwef098234.gujeuk_ai.inference import ReadOnlyInference
@@ -25,13 +26,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--state', type=Path, required=True)
     args = parser.parse_args()
+    from hermes_cli.config import load_env
+    os.environ.update(load_env())
     if not (args.state / 'workspace.db').is_file():
         raise ValueError('existing_workspace_required')
     store = Workspace(args.state / 'workspace.db')
     engine = ReadOnlyInference()
     try:
-        candidates = [d for d in store.documents(500) if d['kind'] == 'notion'
-            and re.search(r'\d{1,2}/\d{1,2}|20\d\d-\d\d-\d\d', d['title'] + d['content'])]
+        candidates = [d | {'content': d['content'][:3000]} for d in store.documents(500)
+            if d['kind'] == 'notion'
+            and re.search(r'\d{1,2}/\d{1,2}|20\d\d-\d\d-\d\d', d['title'] + d['content'][:3000])]
         documents = [{k: d[k] for k in ('id', 'kind', 'title', 'url', 'content')} for d in candidates[:3]]
         if len(documents) < 3:
             raise ValueError('need_three_existing_dated_notion_sources')

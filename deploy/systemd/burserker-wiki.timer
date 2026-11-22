@@ -2,7 +2,7 @@
 Description=Automatically update the private LLM wiki from new and changed sources
 [Timer]
 OnBootSec=180
-OnUnitInactiveSec=120
+OnUnitInactiveSec=30
 Persistent=true
 [Install]
 WantedBy=timers.target

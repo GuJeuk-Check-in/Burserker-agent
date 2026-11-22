@@ -209,39 +209,52 @@ def render(store, root):
     return {'pages': len(groups), **{k: v for k, v in status.items() if k != 'source_coverage'}}
 
 
-def update(store, root, engine, *, batch=8):
+def compile_source(source, engine):
+    """Independent tool-free inference; no Store or filesystem access in threads."""
+    try:
+        if not source['content'].strip():return []
+        prompt = POLICY + '\n<untrusted-source>\n' + json.dumps(source, ensure_ascii=False) + '\n</untrusted-source>'
+        text = engine.ask(prompt, lambda *_: None).strip()
+        if text.startswith('```json') and text.endswith('```'):
+            text = text[7:-3].strip()
+        if len(text) > 50000:raise ValueError('wiki_response_limit')
+        return validate_entries(json.loads(text), source)
+    finally:
+        engine.close()
+
+
+def update(store, root, engine, *, batch=8, workers=1, engine_factory=None):
+    if type(workers) is not int or not 1<=workers<=2 or (workers>1 and engine_factory is None):
+        raise ValueError('invalid_wiki_workers')
     root = Path(root)
     if root.is_symlink():
         raise ValueError('wiki_symlink_rejected')
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     if shutil.disk_usage(root).free < 1024 ** 3:
         raise ValueError('wiki_low_disk')
-    completed = failed = model_calls = empty_sources = 0
-    for source in store.pending_wiki(batch):
-        try:
-            if not source['content'].strip():
-                # Preserve raw evidence/receipt but make no claims or model call.
-                entries=[]
-                empty_sources+=1
-            else:
-                prompt = POLICY + '\n<untrusted-source>\n' + json.dumps(source, ensure_ascii=False) + '\n</untrusted-source>'
-                model_calls+=1
-                text = engine.ask(prompt, lambda *_: None).strip()
-                if text.startswith('```json') and text.endswith('```'):
-                    text = text[7:-3].strip()
-                if len(text) > 50000:
-                    raise ValueError('wiki_response_limit')
-                entries = validate_entries(json.loads(text), source)
-            raw_name = hashlib.sha256((source['kind']+':'+source['id']).encode()).hexdigest() + '-' + fingerprint(source)
-            raw_source = {k: v for k, v in source.items() if k not in {'observed_at', 'poll_observed_at'}}
-            private_write(root, 'raw/' + raw_name + '.json', json.dumps(raw_source, ensure_ascii=False, indent=2), immutable=True)
-            store.wiki_record(source, entries)
-            completed += 1
-        except Exception as error:
-            store.wiki_failed(source, error)
-            failed += 1
-        finally:
-            engine.close()
+    from concurrent.futures import ThreadPoolExecutor
+    sources=store.pending_wiki(batch)
+    model_calls=sum(bool(s['content'].strip()) for s in sources)
+    empty_sources=len(sources)-model_calls
+    completed = failed = 0
+    pool=ThreadPoolExecutor(max_workers=workers) if workers>1 else None
+    try:
+        # Each job gets its OWN SDK agent/context. Never mix private/public sources.
+        factory=engine_factory or (lambda:engine)
+        futures=[pool.submit(compile_source,s,factory()) for s in sources] if pool else []
+        for index,source in enumerate(sources):
+            try:
+                entries=futures[index].result() if pool else compile_source(source,engine)
+                raw_name = hashlib.sha256((source['kind']+':'+source['id']).encode()).hexdigest() + '-' + fingerprint(source)
+                raw_source = {k: v for k, v in source.items() if k not in {'observed_at', 'poll_observed_at'}}
+                private_write(root, 'raw/' + raw_name + '.json', json.dumps(raw_source, ensure_ascii=False, indent=2), immutable=True)
+                store.wiki_record(source, entries)
+                completed += 1
+            except Exception as error:
+                store.wiki_failed(source, error)
+                failed += 1
+    finally:
+        if pool:pool.shutdown(wait=True)
     return {'updated': completed, 'failed': failed, 'model_calls':model_calls,
             'empty_sources':empty_sources, **render(store, root)}
 
@@ -251,9 +264,10 @@ def main():
     parser.add_argument('--state', type=Path, required=True)
     parser.add_argument('--once', action='store_true')
     parser.add_argument('--batch', type=int, default=8)
+    parser.add_argument('--workers', type=int, default=1)
     parser.add_argument('--interval', type=int, default=120)
     args = parser.parse_args()
-    if not 1 <= args.batch <= 30 or args.interval < 60:
+    if not 1 <= args.batch <= 30 or args.interval < 60 or not 1<=args.workers<=2:
         parser.error('invalid wiki bounds')
     from .inference import ReadOnlyInference
     from hermes_cli.config import load_env
@@ -268,7 +282,8 @@ def main():
         while True:
             signal.alarm(180)
             try:
-                print(json.dumps(update(store, args.state / 'wiki', ReadOnlyInference(), batch=args.batch)), flush=True)
+                print(json.dumps(update(store, args.state / 'wiki', ReadOnlyInference(), batch=args.batch,
+                    workers=args.workers,engine_factory=ReadOnlyInference)), flush=True)
             except Exception as error:
                 print(json.dumps({'wiki_error': type(error).__name__}), flush=True)
                 if args.once:

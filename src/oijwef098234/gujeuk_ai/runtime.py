@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -111,6 +112,17 @@ def tick(store, *, notion=collect_notion, github=collect_github, discord=None, f
     for kind, fetch in [('discord', discord), ('notion', notion), ('github', github), ('figma', figma)]:
         if fetch is None:
             continue
+        previous=store.coverage().get(kind,{})
+        retry_at=0
+        for issue in previous.get('issues',[]):
+            if isinstance(issue,dict) and issue.get('status')==429:
+                try:
+                    candidate=float(issue.get('retry_at',0))
+                    if math.isfinite(candidate):retry_at=max(retry_at,candidate)
+                except (ValueError,TypeError):pass
+        if retry_at>time.time():
+            results[kind]={'documents':0,'coverage':previous,'deferred_until':retry_at}
+            continue  # Preserve last actual check/failed status; other sources continue.
         try:
             snapshot = fetch()
             store.ingest(snapshot)

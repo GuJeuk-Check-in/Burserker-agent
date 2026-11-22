@@ -1,6 +1,7 @@
 """Read-only Figma file/node collector. Credentials never enter documents/logs."""
 from pathlib import Path
 import json
+import math
 import time
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 from urllib.parse import urlencode
@@ -29,7 +30,11 @@ def figma_get(path, token):
             raise ValueError('figma_response_limit')
         return json.loads(raw)
     except HTTPError as error:
-        retry_at = time.time() + min(86400, max(60, float(error.headers.get('Retry-After', 300)))) if error.code == 429 else 0
+        try:
+            delay=float(error.headers.get('Retry-After',300))
+            if not math.isfinite(delay):delay=300
+        except (TypeError,ValueError):delay=300
+        retry_at = time.time() + min(366*86400, max(60, delay)) if error.code == 429 else 0
         raise SourceHTTPError(error.code, retry_at) from None
 
 

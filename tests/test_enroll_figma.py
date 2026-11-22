@@ -2,6 +2,7 @@
 import importlib.util
 from email.message import Message
 from pathlib import Path
+from types import SimpleNamespace
 import ssl
 from urllib.error import HTTPError, URLError
 
@@ -16,6 +17,8 @@ def enrollment(monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(module.getpass, 'getpass', lambda prompt: 'fixture-token')
+    monkeypatch.setattr(module.subprocess, 'run', lambda *args, **kwargs:
+                        SimpleNamespace(returncode=0, stdout='', stderr=''))
     return module
 
 
@@ -68,3 +71,22 @@ def test_oversized_response_fails_before_json_parse_or_ssh(enrollment, monkeypat
     monkeypatch.setattr(enrollment, 'build_opener', lambda *args: Opener())
     assert enrollment.main() == 1
     assert '응답 형식이나 크기' in capsys.readouterr().out
+
+
+def test_ssh_timeout_is_detected_before_requesting_token(enrollment, monkeypatch, capsys):
+    def forbidden_input(prompt):
+        pytest.fail('must not request a token before SSH is available')
+    monkeypatch.setattr(enrollment.getpass, 'getpass', forbidden_input)
+    monkeypatch.setattr(enrollment.subprocess, 'run', lambda *args, **kwargs:
+                        SimpleNamespace(returncode=255, stdout='', stderr='Operation timed out: fixture-token'))
+    assert enrollment.main() == 1
+    output = capsys.readouterr().out
+    assert 'SSH 포트(22) 연결 시간 초과' in output
+    assert '토큰은 아직 입력받지 않았어요' in output
+    assert 'fixture-token' not in output
+
+
+def test_ssh_errors_are_sanitized(enrollment):
+    assert '키 인증 실패' in enrollment.ssh_failure('Permission denied: fixture-token')
+    assert '호스트 키 확인 실패' in enrollment.ssh_failure('Host key verification failed: fixture-token')
+    assert 'fixture-token' not in enrollment.ssh_failure('arbitrary failure: fixture-token')

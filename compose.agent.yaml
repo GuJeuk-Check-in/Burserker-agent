@@ -2,17 +2,17 @@ services:
   hermes:
     image: ${BURSERKER_HERMES_IMAGE:?set BURSERKER_HERMES_IMAGE}
     volumes:
-      - ${BURSERKER_CODE:?set BURSERKER_CODE}/src:/opt/data/workspace/gujeuk-pm/src:ro
-      - ${BURSERKER_CODE}/services/gujeuk_pm/plugin:/opt/data/plugins/gujeuk-pm:ro
-      - ${BURSERKER_CODE}/services/gujeuk_pm/agent-skill:/opt/data/skills/gujeuk-pm-source:ro
+      - ${BURSERKER_HERMES_CODE:-${BURSERKER_CODE:?set BURSERKER_CODE}}/src:/opt/data/workspace/gujeuk-pm/src:ro
+      - ${BURSERKER_HERMES_CODE:-${BURSERKER_CODE}}/services/gujeuk_pm/plugin:/opt/data/plugins/gujeuk-pm:ro
+      - ${BURSERKER_HERMES_CODE:-${BURSERKER_CODE}}/services/gujeuk_pm/agent-skill:/opt/data/skills/gujeuk-pm-source:ro
   collector:
     command: ["/collector/collector.py", "--guild", "1413450780068937790", "--state", "/state", "--token-file", "/run/secrets/discord_token", "--interval", "120", "--all-history"]
     volumes:
-      - ${BURSERKER_CODE}/services/gujeuk_pm/collector.py:/collector/collector.py:ro
+      - ${BURSERKER_COLLECTOR_CODE:-${BURSERKER_CODE}}/services/gujeuk_pm/collector.py:/collector/collector.py:ro
   pm-worker:
     image: ${BURSERKER_WORKER_IMAGE:-gujeuk-pm-worker:local}
     command: ["-m", "oijwef098234.gujeuk_ai.runtime", "worker", "--state", "/state", "--discord-state", "/discord", "--collector", "/collector/collector.py", "--interval", "120"]
     volumes:
-      - ${BURSERKER_CODE}/src:/release/src:ro
-      - ${BURSERKER_CODE}/services/gujeuk_pm/collector.py:/collector/collector.py:ro
+      - ${BURSERKER_WORKER_CODE:-${BURSERKER_CODE}}/src:/release/src:ro
+      - ${BURSERKER_WORKER_CODE:-${BURSERKER_CODE}}/services/gujeuk_pm/collector.py:/collector/collector.py:ro
       - ./data/pm-figma:/run/figma:ro

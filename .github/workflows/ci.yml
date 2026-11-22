@@ -32,3 +32,12 @@ jobs:
           "from gateway.session import SessionSource,build_session_key; from gateway.config import Platform;
           s=SessionSource(platform=Platform.DISCORD,chat_id='10',chat_type='thread',scope_id='1413450780068937790',user_id='42',request_lane='123');
           r=SessionSource.from_dict(s.to_dict()); assert r.request_lane=='123'; assert build_session_key(r).endswith(':question:123')"
+      - name: Verify pinned gateway metadata contract used by rollout guards
+        run: >-
+          docker run --rm --network none --entrypoint /opt/hermes/.venv/bin/python
+          burserker-hermes-ci -c
+          "from pathlib import Path;
+          s=Path('/opt/hermes/gateway/status.py').read_text();
+          r=Path('/opt/hermes/gateway/run.py').read_text();
+          assert 'gateway_state.json' in s;
+          assert all(key in s+r for key in ('active_agents','gateway_state','platforms','platform_state'))"

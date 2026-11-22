@@ -8,15 +8,48 @@ EC2의 실제 운영 소스를 가져와 기능별로 최초 커밋을 만들었
 ## GitHub → EC2 Docker
 `main` push → Agent CI(오프라인 테스트·비밀 검사·두 Docker 이미지 빌드·실제 Hermes
 세션 직렬화) → EC2가 해당 push SHA의 CI 성공을 확인 → 불변 release 디렉터리 →
-두 SQLite 온라인 백업 → 핀 고정 Hermes 패치 이미지 빌드 → 에이전트 서비스만 재생성해요.
+실행 입력의 내용 비교 → 필요한 이미지 빌드·서비스만 갱신해요. 실제 실행 변경이
+있을 때만 두 SQLite 온라인 백업을 먼저 수행해요.
 
 EC2 관리 checkout은 `/home/ubuntu/gujeuk-pm/code`, 실제 실행 소스는
 `/home/ubuntu/gujeuk-pm/releases/<40자리 commit SHA>`예요. 실행 중인 소스 위에
-`git pull`하지 않아요. `deployed.json`이 실행 SHA·이미지·코드 경로를 기록해요.
+`git pull`하지 않아요. `deployed.json`의 `revision`은 마지막으로 반영한 CI 통과
+커밋이고, `services.<서비스>.release`와 `image`는 각각 실제 실행 코드·이미지예요.
+문서만 바뀌면 검증한 커밋은 전진하지만 실행 중인 코드 경로는 바뀌지 않아요.
 외부 서비스·Docker volume·실제 DB·프로필·토큰은 지우지 않아요. 자동 Docker
 prune/volume 정리도 없어요. 기존 `gujeuk-pm-worker:local`은 Playwright가 있는
 검증된 의존성 이미지로 재사용하고, 실행 Python 소스는 매 release에 고정해요.
-의존성 변경 시 CI와 동일한 Dockerfile로 worker 이미지를 새로 빌드해야 해요.
+Dockerfile·pyproject·lock 변경 시 worker 이미지를 자동으로 새 SHA 태그로 빌드해요.
+
+### 불필요한 컨테이너 교체 방지
+- `scripts/deploy_plan.py`가 파일 이름·내용과 이미지 입력을 해시해요. 문서·테스트·
+  Figma 등록 도구만 바뀌면 Docker 빌드·재생성·DB 백업을 하지 않아요.
+- 서비스별 불변 소스 경로를 유지해요. 단순히 `--force-recreate`만 제거하면
+  매 커밋마다 바뀌는 bind 경로 때문에 여전히 전부 교체되는 문제를 피했어요.
+- Hermes 패치 이미지와 worker 의존성 이미지는 입력이 바뀔 때만 빌드해요.
+  collector 수정은 collector/worker, wiki 수정은 Hermes/worker만 갱신해요.
+- 게이트웨이 재시작 전, 응답 중인 세션이나 실행 중인 wiki가 확인되면 다음
+  배포 주기로 미뤄요. 이미지 빌드 후에도 다시 검사해요. 이 검사는 admission을
+  잠그는 원자적 drain은 아니므로 새 질문과의 모든 경합을 방지한다고 주장하지 않아요.
+- 컨테이너가 실행 중이고 재시작/OOM 상태가 아닌지 확인해요. Hermes 교체 시에는
+  새로 작성된 게이트웨이 상태와 Discord 연결까지 확인한 뒤 성공 기록을 교체해요.
+  실패 시 성공 SHA를 전진시키지 않으며, 데이터 자동 복원·삭제는 하지 않아요.
+- 기존 기록에 해시가 없으면 이전 release의 실제 파일과 비교해요. 최초 서비스별
+  경로 도입 시 설정 변경에 따른 한 번의 교체는 필요할 수 있어요.
+- `deploy.py --revision <SHA> --plan`은 불변 release와 계획만 준비하고 Docker나
+  DB를 변경하지 않아요. 운영 중 main의 정확한 SHA/CI 확인은 pull_deploy가 담당해요.
+
+에이전트는 gateway·Discord collector·업무 worker·Notion browser reader 4개예요.
+분리된 browser는 업무 DB·모델/Discord 자격 증명을 마운트하지 않아요. reader와
+worker는 같은 의존성 이미지를 공유해요. 컨테이너 수와 이미지 레이어 사용량은
+같은 개념이 아니며, 종료 이력의 마지막 메모리 값은 현재 사용량이 아니에요.
+모니터 화면의 같은 이름 EXITED/UP만으로 실제 중복 실행을 판단하지 않아요.
+기존 Caddy·Redis·다른 애플리케이션은 이 배포 대상이 아니에요.
+
+실제 CPU/메모리 peak와 호스트 여유를 측정하기 전에는 한도를 임의로 낮추거나
+서비스를 합치지 않아요. 이번 변경에 중지 컨테이너·이미지·캐시·볼륨·백업 삭제나
+자동 정리는 포함하지 않아요. 기존 종료 컨테이너가 남았는지는 `docker ps -a`와
+Compose 라벨로 확인하고, 정리 대상과 보존 범위를 별도 승인받아야 해요.
 
 운영 관리자가 승인한 main만 실행해요. PR 코드를 EC2에서 실행하지 않아요.
 프로덕션 SSH 키를 GitHub Actions에 제공하거나 공개 PR에 self-hosted runner를

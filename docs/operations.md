@@ -37,6 +37,10 @@ prune/volume 정리도 없어요. 기존 `gujeuk-pm-worker:local`은 Playwright�
   `scripts/enroll_figma.py`의 숨김 입력으로 등록해요. 채팅/명령행 인자에 토큰을
   붙이지 않아요. 파일 노드·텍스트·구조/스타일을 수집하며 렌더 이미지·댓글을
   읽었다고 주장하지 않아요. 토큰 미등록/권한/429는 coverage에 표시해요.
+  Mac 등록 실행은 `uv run --frozen --extra pm-server python scripts/enroll_figma.py`를
+  사용해요. Terminal의 일반 `python3`는 프로젝트 Python과 다를 수 있어요.
+  `URLError` 안의 `SSLCertVerificationError`는 토큰 오류가 아니라 해당 Python의
+  인증서 문제예요. TLS 검증을 끄지 말고 프로젝트 환경의 연결부터 확인해요.
 
 Discord 원문과 wiki 검색은 요청자의 현재 View Channel/Read Message History,
 비공개 스레드 멤버십을 확인해요. 여러 출처의 위키 파일 전체를 팀에 그대로

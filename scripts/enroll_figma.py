@@ -5,8 +5,11 @@ import getpass
 import json
 import subprocess
 import sys
+import ssl
 from urllib.request import Request, build_opener, HTTPRedirectHandler
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
+
+MAX_VALIDATION_RESPONSE = 2 * 1024 * 1024
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -24,11 +27,24 @@ def main():
     try:
         url='https://api.figma.com/v1/files/VHUfbJB75st06zIBdIIRJT?depth=1'
         with build_opener(NoRedirect()).open(Request(url,headers={'X-Figma-Token':token}),timeout=30) as response:
-            data=json.loads(response.read(512*1024))
+            raw=response.read(MAX_VALIDATION_RESPONSE + 1)
+        if len(raw) > MAX_VALIDATION_RESPONSE:
+            raise ValueError('response_too_large')
+        data=json.loads(raw)
         if 'document' not in data:
             raise ValueError('invalid_file_result')
     except HTTPError as error:
         print(f'읽기 확인 실패: HTTP {error.code}. 토큰 범위와 파일 접근 권한을 확인해 주세요.')
+        return 1
+    except URLError as error:
+        if isinstance(error.reason, ssl.SSLCertVerificationError):
+            print('HTTPS 인증서 검증에 실패했어요. 토큰 입력 문제가 아니라 현재 Python의 인증서 설정 문제예요.')
+            print('프로젝트의 uv 실행기로 다시 실행해 주세요: uv run --frozen --extra pm-server python scripts/enroll_figma.py')
+        else:
+            print('Figma 서버 연결에 실패했어요. 네트워크·프록시·DNS를 확인해야 해요. 토큰이 잘못됐다는 응답은 아니에요.')
+        return 1
+    except ValueError:
+        print('Figma 응답 형식이나 크기를 확인하지 못했어요. 입력을 반복하지 말고 등록 도구를 점검해야 해요.')
         return 1
     except Exception as error:
         print('읽기 확인 실패: '+type(error).__name__); return 1

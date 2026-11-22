@@ -227,9 +227,11 @@ def test_real_compose_config_keeps_service_specific_mounts(tmp_path, monkeypatch
     if not shutil.which('docker'):
         pytest.skip('Docker Compose available in CI; no Docker daemon needed')
     module = load('deploy')
+    monkeypatch.setattr(module, 'BASE', tmp_path)
     pins = {name: {'release': str(tmp_path / name)} for name in planner.SERVICES}
     args, env = module.compose(ROOT, 'hermes:test', worker_image='worker:test', services=pins)
-    result = subprocess.run(args + ['config', '--format', 'json'], env=env, capture_output=True, text=True, check=True)
+    result = subprocess.run(args + ['config', '--format', 'json'], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
     services = json.loads(result.stdout)['services']
     for name, destination in [('hermes', '/opt/data/workspace/gujeuk-pm/src'), ('pm-worker', '/release/src')]:
         volume = next(v for v in services[name]['volumes'] if v['target'] == destination)

@@ -54,6 +54,10 @@ Compose 라벨로 확인하고, 정리 대상과 보존 범위를 별도 승인�
 운영 관리자가 승인한 main만 실행해요. PR 코드를 EC2에서 실행하지 않아요.
 프로덕션 SSH 키를 GitHub Actions에 제공하거나 공개 PR에 self-hosted runner를
 노출하지 않아요. 첫 설치 후 `burserker-deploy.timer`가 2분 간격으로 확인해요.
+GitHub API의 quota/secondary 403·429는 `deploy-ci.json`에 재시도 시각을
+보존하고, 그 전에는 새 main이 생겨도 API를 다시 호출하지 않아요. 인증/접근
+403과 quota를 구분하며 정확한 SHA의 성공 CI를 우회하지 않아요. CI 대기나
+backoff로 oneshot이 종료된 것은 배포 완료가 아니므로 `deployed.json`을 확인해요.
 
 ## 읽기 범위와 빠짐 추적
 - Discord: 구즉 guild만, 타 guild/DM 제외. 최근 증분+누락 복구와 전체 과거 역방향
@@ -74,6 +78,9 @@ Compose 라벨로 확인하고, 정리 대상과 보존 범위를 별도 승인�
   사용해요. Terminal의 일반 `python3`는 프로젝트 Python과 다를 수 있어요.
   `URLError` 안의 `SSLCertVerificationError`는 토큰 오류가 아니라 해당 Python의
   인증서 문제예요. TLS 검증을 끄지 말고 프로젝트 환경의 연결부터 확인해요.
+  수집기는 GitHub/Figma의 429 `retry_at`을 재시작 뒤에도 지켜요. 대기 중에는
+  마지막 실제 확인 시각·오류를 보존하고 다른 출처는 계속 처리해요.
+  `scripts/verify_figma.py`의 metadata 성공은 지정 노드 본문 수집 성공과 달라요.
 
 Discord 원문과 wiki 검색은 요청자의 현재 View Channel/Read Message History,
 비공개 스레드 멤버십을 확인해요. 여러 출처의 위키 파일 전체를 팀에 그대로
@@ -96,7 +103,10 @@ upstream 패치 문맥이 바뀌면 Docker 빌드가 실패해서 자동으로 �
 `coverage.json`을 자동 생성해요. 코드 저장소는 `wiki/`와 실제 데이터 디렉터리를
 Git/Docker context에서 제외해요. 개인 SecondBrain은 복제하지 않아요.
 
-`burserker-wiki.timer`가 새 문서/수정 문서를 최대 8개씩 처리해요. LLM에는
+`burserker-wiki.timer`가 새 문서/수정 문서를 최대 24개씩, 독립 SDK agent
+2개로 처리하고 완료 후 30초 쉬어요. SQLite/파일 쓰기는 메인 스레드만 하고,
+출처 원문을 한 프롬프트에 섞지 않아요. 빈 원문은 LLM 호출 없이 raw와 처리
+기록을 보존하고, 출처 종류를 번갈아 처리하며 변경 없는 파일은 다시 쓰지 않아요. LLM에는
 도구·프로필 메모리·프로젝트 지침을 제공하지 않아요. 모델은 경로나 코드를 쓰지
 않고 고정 JSON 주장만 반환해요. 프로그램이 원문 그대로의 인용을 검증한 뒤
 안전한 해시 경로에 원자적으로 써요. 원문이 바뀌면 그 원문의 이전 주장을

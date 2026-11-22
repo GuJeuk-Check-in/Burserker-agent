@@ -92,11 +92,13 @@ class WikiWorkspace(Workspace):
                 self.db.execute("INSERT OR REPLACE INTO workspace_meta VALUES('wiki_policy_version',?)", (POLICY_VERSION,))
 
     def pending_wiki(self, limit=8):
-        rows = self.db.execute('''SELECT d.data FROM documents d LEFT JOIN wiki_sources w
+        rows = self.db.execute('''SELECT data FROM (SELECT d.data,d.kind,d.id,
+            row_number() OVER(PARTITION BY d.kind ORDER BY d.id) AS source_rank
+            FROM documents d LEFT JOIN wiki_sources w
             ON d.kind=w.kind AND d.id=w.id LEFT JOIN wiki_failures f ON d.kind=f.kind AND d.id=f.id
             WHERE (w.digest IS NULL OR w.digest!=d.digest)
             AND (f.retry_at IS NULL OR f.retry_at<=? OR f.digest!=d.digest)
-            ORDER BY d.kind,d.id LIMIT ?''', (time.time(), limit))
+            ) ORDER BY source_rank,kind,id LIMIT ?''', (time.time(), limit))
         return [json.loads(r[0]) for r in rows]
 
     def wiki_status(self):
@@ -164,6 +166,9 @@ def private_write(root, relative, text, *, immutable=False):
         if path.read_text() != text:
             raise ValueError('wiki_raw_immutable_conflict')
         return
+    if path.is_file() and path.read_text()==text:
+        path.chmod(0o600)
+        return
     temporary = path.with_name(path.name + '.tmp')
     if temporary.is_symlink():
         raise ValueError('wiki_symlink_rejected')
@@ -211,16 +216,22 @@ def update(store, root, engine, *, batch=8):
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     if shutil.disk_usage(root).free < 1024 ** 3:
         raise ValueError('wiki_low_disk')
-    completed = failed = 0
+    completed = failed = model_calls = empty_sources = 0
     for source in store.pending_wiki(batch):
         try:
-            prompt = POLICY + '\n<untrusted-source>\n' + json.dumps(source, ensure_ascii=False) + '\n</untrusted-source>'
-            text = engine.ask(prompt, lambda *_: None).strip()
-            if text.startswith('```json') and text.endswith('```'):
-                text = text[7:-3].strip()
-            if len(text) > 50000:
-                raise ValueError('wiki_response_limit')
-            entries = validate_entries(json.loads(text), source)
+            if not source['content'].strip():
+                # Preserve raw evidence/receipt but make no claims or model call.
+                entries=[]
+                empty_sources+=1
+            else:
+                prompt = POLICY + '\n<untrusted-source>\n' + json.dumps(source, ensure_ascii=False) + '\n</untrusted-source>'
+                model_calls+=1
+                text = engine.ask(prompt, lambda *_: None).strip()
+                if text.startswith('```json') and text.endswith('```'):
+                    text = text[7:-3].strip()
+                if len(text) > 50000:
+                    raise ValueError('wiki_response_limit')
+                entries = validate_entries(json.loads(text), source)
             raw_name = hashlib.sha256((source['kind']+':'+source['id']).encode()).hexdigest() + '-' + fingerprint(source)
             raw_source = {k: v for k, v in source.items() if k not in {'observed_at', 'poll_observed_at'}}
             private_write(root, 'raw/' + raw_name + '.json', json.dumps(raw_source, ensure_ascii=False, indent=2), immutable=True)
@@ -231,7 +242,8 @@ def update(store, root, engine, *, batch=8):
             failed += 1
         finally:
             engine.close()
-    return {'updated': completed, 'failed': failed, **render(store, root)}
+    return {'updated': completed, 'failed': failed, 'model_calls':model_calls,
+            'empty_sources':empty_sources, **render(store, root)}
 
 
 def main():

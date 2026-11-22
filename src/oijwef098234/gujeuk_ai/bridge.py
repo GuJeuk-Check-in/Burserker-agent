@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from .reporting import citation_sources
 
 
 def invoke(params, *, runner=subprocess.run):
@@ -21,6 +22,7 @@ def invoke(params, *, runner=subprocess.run):
             except ValueError:
                 result['cache_error'] = 'cache_not_updated'
         result.pop('discovered_urls', None)
+        result['citation_sources'] = citation_sources(result.get('documents', []))
         return {'ok': True, 'result': result, 'untrusted_source_content': True}
     if op == 'tasks':
         request = {'op': 'snapshot'}
@@ -45,11 +47,13 @@ def invoke(params, *, runner=subprocess.run):
     if op == 'tasks':
         items = [row | {'note': row.get('note', '')[:1500]} for row in data['items'][:200]]
         data = {'items': items, 'pending_proposals': data['proposals'][:100],
+                'proposal_review': data.get('proposal_review', {}),
                 'observed_at': data['observed_at'], 'notion_writes': False,
                 'limits': '서버 초안이에요. Notion 공식 상태와 구분하고 원문을 확인하세요.'}
     elif op in {'search', 'wiki_search'}:
         data = {'documents': [row | {'content': row['content'][:6000]} for row in data],
                 'limits': '검색 최대 10개, 본문 각 6000자. 결과 없음은 전체 자료 없음이 아니에요.'}
+        data['citation_sources'] = citation_sources(data['documents'])
     return {'ok': True, 'result': data, 'untrusted_source_content': True}
 
 

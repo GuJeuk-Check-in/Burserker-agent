@@ -69,8 +69,10 @@ def filter_evidence(result, roles, actor_id, *, get=discord_get):
     Search is bounded to ten documents. Unknown permissions and private threads
     fail closed. No cache survives a call, so role removal takes effect promptly.
     """
-    documents = result.get('result', {}).get('documents')
-    if documents is None:
+    payload = result.get('result', {})
+    lists = [key for key in ('documents', 'items', 'pending_proposals')
+             if isinstance(payload.get(key), list)]
+    if not lists:
         return result
     channels, role_rows = {}, None
     def visible(doc):
@@ -121,9 +123,16 @@ def filter_evidence(result, roles, actor_id, *, get=discord_get):
         except Exception:
             channels[channel_id] = False
             return False
-    allowed = [doc for doc in documents if visible(doc)]
-    result['result']['documents'] = allowed
-    result['result']['access_filtered'] = len(allowed) != len(documents)
+    filtered = False
+    for key in lists:
+        original = payload[key]
+        allowed = [row for row in original if visible(row)]
+        payload[key] = allowed
+        filtered = filtered or len(allowed) != len(original)
+    payload['access_filtered'] = filtered
+    if 'documents' in lists and 'citation_sources' in payload:
+        from .reporting import citation_sources
+        payload['citation_sources'] = citation_sources(payload['documents'])
     return result
 
 

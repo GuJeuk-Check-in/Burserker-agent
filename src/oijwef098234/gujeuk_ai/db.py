@@ -6,7 +6,7 @@ Notion 연결 전의 항목은 모두 로컬 초안이에요. 연동된 공식 �
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -139,6 +139,12 @@ class Store:
         # Additive migration: keep IDs, source keys, audit and pending approvals.
         columns = {r[1] for r in self.db.execute("PRAGMA table_info(items)")}
         with self.db:
+            proposal_columns = {r[1] for r in self.db.execute('PRAGMA table_info(proposals)')}
+            if 'created_at' not in proposal_columns:
+                self.db.execute("ALTER TABLE proposals ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")
+            self.db.execute('''CREATE TABLE IF NOT EXISTS proposal_observations(
+                source_key TEXT PRIMARY KEY, proposal_id INTEGER NOT NULL, data TEXT NOT NULL,
+                url TEXT NOT NULL, created_at TEXT NOT NULL)''')
             for name, declaration in {"subtitle": "TEXT NOT NULL DEFAULT ''", "major": "TEXT NOT NULL DEFAULT ''",
                                       "assignees": "TEXT NOT NULL DEFAULT '[]'", "begins": "TEXT NOT NULL DEFAULT ''"}.items():
                 if name not in columns:
@@ -213,6 +219,121 @@ class Store:
     def proposals(self):
         return [dict(r) for r in self.db.execute("SELECT * FROM proposals WHERE state='pending' ORDER BY id")]
 
+    @staticmethod
+    def _proposal_delta(item, clean):
+        return {k: v for k, v in clean.items() if v != item.editable()[k]}
+
+    @staticmethod
+    def _proposal_key(item, clean, url, *, automated=False):
+        delta = Store._proposal_delta(item, clean)
+        # Automated note wording must not re-enqueue an identical substantive change.
+        # Explicit human note edits still use exact equality. Different source URLs
+        # never collapse, preserving original-source permission boundaries.
+        if automated:
+            delta.pop('note', None)
+        return item.id, item.version, url, json.dumps(delta, sort_keys=True, ensure_ascii=False)
+
+    def propose_change(self, ident, version, patch, *, source_key, url='', automated=False):
+        with self.db:
+            if not self.db.in_transaction:
+                self.db.execute('BEGIN IMMEDIATE')
+            item = self.get(ident)
+            if type(version) is not int or version != item.version:
+                raise ValueError('원본 버전이 바뀌었어요. 새로고침 후 다시 제안해 주세요')
+            if 'owner' in patch and 'assignees' not in patch:
+                patch = patch | {'assignees': [patch['owner']] if patch['owner'] else []}
+            clean = validate(item.editable() | patch)
+            if not self._proposal_delta(item, clean):
+                return {'proposal_id': None, 'skipped': 'unchanged'}
+            timestamp = datetime.now(timezone.utc).isoformat()
+            previous = self.db.execute('''SELECT o.proposal_id,o.data,o.url,p.item_id,p.base_version
+                FROM proposal_observations o JOIN proposals p ON p.id=o.proposal_id
+                WHERE o.source_key=?''', (source_key,)).fetchone()
+            if previous:
+                if (json.loads(previous['data']) != clean or previous['url'] != url
+                        or previous['item_id'] != ident or previous['base_version'] != version):
+                    raise ValueError('제안 요청 키를 다른 내용으로 재사용할 수 없어요')
+                return {'proposal_id': previous[0], 'deduplicated': True}
+            key = self._proposal_key(item, clean, url, automated=automated)
+            for row in self.db.execute("SELECT * FROM proposals WHERE item_id=? AND base_version=? AND state='pending' ORDER BY id", (ident, version)):
+                try:
+                    candidate = validate(json.loads(row['data']))
+                except (ValueError, TypeError):
+                    continue
+                if self._proposal_key(item, candidate, row['url'], automated=automated) == key:
+                    self.db.execute('INSERT INTO proposal_observations VALUES(?,?,?,?,?)',
+                        (source_key, row['id'], json.dumps(clean, ensure_ascii=False), url, timestamp))
+                    return {'proposal_id': row['id'], 'deduplicated': True}
+            cursor = self.db.execute('INSERT INTO proposals(source_key,item_id,base_version,data,url,created_at) VALUES(?,?,?,?,?,?)',
+                (source_key, ident, version, json.dumps(clean, ensure_ascii=False), url, timestamp))
+            self.db.execute('INSERT INTO proposal_observations VALUES(?,?,?,?,?)',
+                (source_key, cursor.lastrowid, json.dumps(clean, ensure_ascii=False), url, timestamp))
+            return {'proposal_id': cursor.lastrowid, 'deduplicated': False}
+
+    def proposal_review(self):
+        """Non-destructive projection; never expires, rejects or approves a record."""
+        counts = dict.fromkeys(('pending_records', 'review_groups', 'duplicate_records',
+            'note_variants', 'stale_version', 'no_change', 'orphaned', 'invalid',
+            'age_unknown', 'older_than_14_days', 'observation_variants'), 0)
+        groups, exact, substantive = [], {}, {}
+        checked = datetime.now(timezone.utc).timestamp()
+        for row in self.proposals():
+            counts['pending_records'] += 1
+            created = self.proposal_created_at(row)
+            try:
+                timestamp = datetime.fromisoformat(created)
+                if timestamp.tzinfo is None:
+                    raise ValueError('unknown timezone')
+                if checked - timestamp.timestamp() > 14 * 86400:
+                    counts['older_than_14_days'] += 1
+            except (ValueError, TypeError):
+                counts['age_unknown'] += 1
+            try:
+                clean = validate(json.loads(row['data']))
+            except (ValueError, TypeError):
+                counts['invalid'] += 1
+                continue
+            if row['item_id'] == 0:  # Legacy new-item proposals remain reviewable.
+                key = core = (0, row['url'], json.dumps(clean, sort_keys=True, ensure_ascii=False))
+            else:
+                try:
+                    item = self.get(row['item_id'])
+                except ValueError:
+                    counts['orphaned'] += 1
+                    continue
+                if row['base_version'] != item.version:
+                    counts['stale_version'] += 1
+                    continue
+                if not self._proposal_delta(item, clean):
+                    counts['no_change'] += 1
+                    continue
+                key = self._proposal_key(item, clean, row['url'])
+                core = self._proposal_key(item, clean, row['url'], automated=True)
+            if key in exact:
+                counts['duplicate_records'] += 1
+                exact[key]['review_member_ids'].append(row['id'])
+            elif core in substantive:
+                counts['note_variants'] += 1
+                substantive[core]['review_member_ids'].append(row['id'])
+                substantive[core]['review_flags'] = ['note_variants_require_review']
+                exact[key] = substantive[core]
+            else:
+                group = row | {'review_member_ids': [row['id']], 'review_flags': []}
+                groups.append(group)
+                exact[key] = substantive[core] = group
+            group = exact[key]
+            variants = sum(json.loads(observation[0]) != clean for observation in self.db.execute(
+                'SELECT data FROM proposal_observations WHERE proposal_id=?', (row['id'],)))
+            counts['observation_variants'] += variants
+            if variants:
+                group['review_flags'] = ['note_variants_require_review']
+        counts['review_groups'] = len(groups)
+        return {'counts': counts, 'groups': groups, 'automatic_resolution': False,
+                'meaning': '앱 초안 변경 제안이에요. 공식 미완료 업무 수가 아니며 원본 기록은 보존돼요.'}
+
+    def proposal_created_at(self, row):
+        return row.get('created_at', '')
+
     def receive_discord(self, payload: dict) -> tuple[str, int]:
         """Explicit structured bridge, NOT an LLM parser or a network sync.
 
@@ -253,11 +374,8 @@ class Store:
         else:
             data, version = validate(payload.get("data", {})), 0
             return "created", self.add(data, source="discord", source_key=key, url=url)
-        with self.db:
-            row = self.db.execute("INSERT INTO proposals(source_key,item_id,base_version,data,url) VALUES(?,?,?,?,?)",
-                                  (key, ident, version, json.dumps(data, ensure_ascii=False), url))
-            assert row.lastrowid is not None
-        return "proposal", row.lastrowid
+        result = self.propose_change(ident, version, data, source_key=key, url=url)
+        return ("unchanged", ident) if result.get('skipped') else ("proposal", result['proposal_id'])
 
     def resolve(self, ident: int, approve: bool):
         # One transaction: rejecting/approving twice cannot execute twice; stale

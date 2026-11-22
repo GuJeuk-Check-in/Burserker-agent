@@ -118,6 +118,27 @@ Git/Docker context에서 제외해요. 개인 SecondBrain은 복제하지 않아
 위키 처리 대기가 있는데 '모든 정보 구축 완료'라고 답하면 안 돼요.
 
 ## 점검
+
+### 보고 형식·승인 대기열
+
+기본 현황은 현재 상태 → 주요 제약 → 다음 확인(최대 3개)로 요약하고 통계는 요청할 때만 펼쳐요.
+출처 요청에는 일정/날짜 각각에 실제 읽은 원문 URL을 붙여요. 이 정책은 스킬뿐 아니라
+항상 노출되는 `gujeuk_pm` 도구 설명에도 주입돼요. `citation_sources`는 검색 결과의 실제 URL만
+반환하며, 접근 제한으로 원문이 걸러지면 출처 포인터도 함께 걸러요.
+
+`proposal_review`는 원본을 삭제/승인/거절하지 않는 검토용 뷰예요. 정확한 중복과 메모 변형을
+묶고, 현재 원본 버전과 맞지 않거나 변경이 없는 제안은 검토 대기 그룹에서 분리해요.
+같은 제목만으로 다른 태스크/출처를 합치지 않아요. 묶인 메모 변형은 추가 검토 대상으로
+표시하고 원본 번호를 보존해요. 동일한 자동 변경은 새 제안 대신 `proposal_observations`에
+새 근거/메모를 보존해요. 명시적인 사용자 제안은 정확히 같은 변경만 재사용해요.
+생성 시각은 새 기록 또는 동일 트랜잭션의 분석 회차 시각을 쓰고, 둘 다 없으면 미확인으로
+남겨요. 14일 초과는 점검 표식일 뿐 자동 만료/완료가 아니에요.
+
+소유자 CLI: `scripts/review_proposals.py --state /opt/data/pm-workspace` (집계만 출력).
+`scripts/verify_pm_reporting.py --state /opt/data/pm-workspace`는 기존 Notion 자료로 실제
+도구 없는 LLM의 짧은 현황·항목별 링크를 확인해요. Discord에 게시하거나 사용자 역할을
+사칭하지 않으며, 실제 Discord 대화/정답성 전체를 보증하는 테스트가 아니에요.
+
 개발: `uv run --extra pm-server pytest -q`, `python3 scripts/security_check.py`.
 운영: `systemctl status burserker-deploy.timer burserker-wiki.timer`,
 `journalctl -u burserker-deploy -u burserker-wiki`, `deployed.json`,

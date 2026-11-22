@@ -97,12 +97,25 @@ class Workspace(Store):
     def source_status(self):
         counts = dict(self.db.execute('SELECT kind,count(*) FROM documents GROUP BY kind'))
         coverage = self.coverage()
+        review = self.proposal_review()
         return {'workspace': 'gujeuk-server', 'checked': now(), 'notion_writes': False,
                 'sources': {kind: {'documents': counts.get(kind, 0),
                     'coverage': coverage.get(kind, {'issues': ['not_collected']})}
                     for kind in ('notion', 'discord', 'github', 'figma')},
                 'analysis': coverage.get('analysis'), 'tasks': len(self.items()),
-                'pending_proposals': len(self.proposals())}
+                'pending_proposals': review['counts']['review_groups'],
+                'task_count_kind': 'local_drafts_not_official_notion_tasks',
+                'proposal_review': {k: v for k, v in review.items() if k != 'groups'}}
+
+    def proposal_created_at(self, row):
+        if row.get('created_at'):
+            return row['created_at']
+        match = re.fullmatch(r'(?:request:ai:|analysis:)([0-9a-f]{64}):[0-9]+', row['source_key'])
+        if match:
+            run = self.db.execute('SELECT created FROM model_runs WHERE digest=?', (match[1],)).fetchone()
+            if run:
+                return run[0]  # Same atomic analysis transaction, not a guessed task date.
+        return ''
 
     def backup_to(self, path):
         import os
@@ -190,8 +203,10 @@ class Workspace(Store):
             self.db.execute("INSERT INTO workspace_meta VALUES('notion_frontier_seeded','1')")
 
     def snapshot(self):
+        review = self.proposal_review()
         return {'protocol': 1, 'workspace': 'gujeuk-server', 'observed_at': now(),
-                'items': [asdict(i) for i in self.items()], 'proposals': self.proposals(),
+                'items': [asdict(i) for i in self.items()], 'proposals': review['groups'],
+                'proposal_review': {k: v for k, v in review.items() if k != 'groups'},
                 'estimates': [e for i in self.items() if (e := self.estimate(i.id))],
                 'coverage': self.coverage(), 'documents': self.documents(100),
                 'authority': 'notion', 'notion_writes': False}
@@ -234,15 +249,8 @@ class Workspace(Store):
                     result = {'item_id': self.add(data, source_key='request:' + key)}
                 elif op == 'propose':
                     ident, version, patch = data['item_id'], data['version'], data['patch']
-                    item = self.get(ident)
-                    if type(version) is not int or version != item.version:
-                        raise ValueError('원본 버전이 바뀌었어요. 새로고침 후 다시 제안해 주세요')
-                    if 'owner' in patch and 'assignees' not in patch:
-                        patch = patch | {'assignees': [patch['owner']] if patch['owner'] else []}
-                    clean = validate(item.editable() | patch)
-                    cursor = self.db.execute('INSERT INTO proposals(source_key,item_id,base_version,data,url) VALUES(?,?,?,?,?)',
-                        ('request:' + key, ident, version, json.dumps(clean, ensure_ascii=False), data.get('url', '')))
-                    result = {'proposal_id': cursor.lastrowid}
+                    result = self.propose_change(ident, version, patch,
+                        source_key='request:' + key, url=data.get('url', ''))
                 elif op == 'resolve':
                     if type(data.get('approve')) is not bool:
                         raise ValueError('approval must be boolean')
@@ -295,8 +303,8 @@ class Workspace(Store):
                         raise ValueError('missing primary source evidence')
                     data = action['data']
                     if 'item_id' in action:
-                        self.command({'id': f'ai:{digest}:{index}', 'op': 'propose', 'data': {
-                            'item_id': action['item_id'], 'version': action['version'], 'patch': data, 'url': url}})
+                        self.propose_change(action['item_id'], action['version'], data,
+                            source_key=f'analysis:{digest}:{index}', url=url, automated=True)
                     else:
                         stable = hashlib.sha256((url + '\n' + data['title'].strip()).encode()).hexdigest()
                         self.add(data, source='local', source_key=f'ai-source:{stable}', url=url)
@@ -322,11 +330,15 @@ class _NestedConnection:
     """SAVEPOINT contexts preserve the outer request/analysis transaction."""
     def __init__(self, db):
         self.db, self.depth = db, 0
+        self.owns_transaction = False
 
     def __getattr__(self, key):
         return getattr(self.db, key)
 
     def __enter__(self):
+        if self.depth == 0 and not self.db.in_transaction:
+            self.db.execute('BEGIN IMMEDIATE')
+            self.owns_transaction = True
         self.depth += 1
         self.db.execute(f'SAVEPOINT gujeuk_{self.depth}')
         return self
@@ -337,3 +349,6 @@ class _NestedConnection:
             self.db.execute(f'ROLLBACK TO {name}')
         self.db.execute(f'RELEASE {name}')
         self.depth -= 1
+        if self.depth == 0 and self.owns_transaction:
+            self.db.rollback() if kind else self.db.commit()
+            self.owns_transaction = False

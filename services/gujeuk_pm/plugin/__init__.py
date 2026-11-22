@@ -4,6 +4,10 @@ import sys
 
 
 def register(ctx):
+    path = '/opt/data/workspace/gujeuk-pm/src'
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    from oijwef098234.gujeuk_ai.reporting import REPLY_POLICY
     schema = {
         'name': 'gujeuk_pm',
         'description': (
@@ -58,5 +62,6 @@ def register(ctx):
             return json.dumps({'ok': False, 'error': type(error).__name__,
                                'message': 'PM 조회에 실패했어요. 수집 상태와 항목 버전을 확인하세요.'}, ensure_ascii=False)
 
+    schema['description'] += '\n' + REPLY_POLICY
     ctx.register_tool(name='gujeuk_pm', toolset='gujeuk_pm', schema=schema, handler=handle,
                       description=schema['description'])

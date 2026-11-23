@@ -1,6 +1,6 @@
 """Bounded public Notion reader over a private file queue, without shell access.
 
-The browser runs in a separate restricted container. Gateway requests are already
+The browser runs as a restricted reader (separate container or Unix user). Gateway requests are already
 member-authorized; the reader independently validates every URL and never writes
 Notion, tasks, proposals or approvals. Queue files contain untrusted source data.
 """
@@ -33,8 +33,12 @@ def write_new(path, data):
     if len(raw) > MAX_RESPONSE:
         raise ValueError('reader response too large')
     temporary = path.with_name(path.name + '.tmp-' + uuid.uuid4().hex)
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    mode = 0o660 if os.environ.get('GUJEUK_READER_SHARED_QUEUE') == '1' else 0o600
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
     try:
+        # The shared setgid queue is the reader's only group-readable data.
+        # Explicit fchmod is needed because worker startup uses umask 077.
+        os.fchmod(fd, mode)
         with os.fdopen(fd, 'wb') as output:
             output.write(raw)
         if path.exists() or path.is_symlink():

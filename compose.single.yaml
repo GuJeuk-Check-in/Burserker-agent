@@ -1,0 +1,44 @@
+name: gujeuk-pm
+services:
+  hermes:
+    image: ${BURSERKER_HERMES_IMAGE:?set BURSERKER_HERMES_IMAGE}
+    container_name: gujeuk-pm-hermes
+    command: [gateway, run]
+    restart: unless-stopped
+    cpus: 1.3
+    mem_limit: 3g
+    memswap_limit: 3g
+    pids_limit: 512
+    stop_grace_period: 60s
+    security_opt: [no-new-privileges:true]
+    environment:
+      HERMES_UID: '1000'
+      HERMES_GID: '1000'
+      HERMES_HOME: /opt/data
+      API_SERVER_ENABLED: 'false'
+      HERMES_DASHBOARD: '0'
+      GUJEUK_READER_SHARED_QUEUE: '1'
+    volumes:
+      - ./data:/opt/data
+      - ${BURSERKER_HERMES_CODE:-${BURSERKER_CODE}}/src:/release/src:ro
+      - ${BURSERKER_HERMES_CODE:-${BURSERKER_CODE:?set BURSERKER_CODE}}/src:/opt/data/workspace/gujeuk-pm/src:ro
+      - ${BURSERKER_HERMES_CODE:-${BURSERKER_CODE}}/services/gujeuk_pm/plugin:/opt/data/plugins/gujeuk-pm:ro
+      - ${BURSERKER_HERMES_CODE:-${BURSERKER_CODE}}/services/gujeuk_pm/agent-skill:/opt/data/skills/gujeuk-pm-source:ro
+      - ${BURSERKER_HERMES_CODE:-${BURSERKER_CODE}}/services/gujeuk_pm/collector.py:/collector/collector.py:ro
+      - ./data/pm-workspace/notion-read:/requests
+      - ./data/pm-discord-token:/run/secrets/discord_token:ro
+      - ./data/pm-figma:/run/figma:ro
+    healthcheck:
+      test: [CMD, /opt/hermes/.venv/bin/python, /opt/burserker/supervisor.py, --health]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+    networks: [pm]
+networks:
+  pm:
+    external: true
+    name: gujeuk-pm-net

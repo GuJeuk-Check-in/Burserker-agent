@@ -57,6 +57,8 @@ def make_plan(release, previous, *, force_worker=False):
     files. A missing old release causes a conservative rollout, never a skip.
     """
     release = Path(release)
+    if (release / 'compose.single.yaml').is_file():
+        return make_single_plan(release, previous, force=force_worker)
     old_root = Path(previous.get('release', ''))
     known_old = bool(previous.get('release')) and old_root.is_dir()
     previous_images = previous.get('images', {})
@@ -90,3 +92,24 @@ def make_plan(release, previous, *, force_worker=False):
         if changed:
             targets.append(name)
     return {'images': images, 'services': services, 'builds': builds, 'targets': targets}
+
+
+def make_single_plan(release, previous, *, force=False):
+    image_inputs = ('services/gujeuk_pm/Dockerfile.single', 'services/gujeuk_pm/single',
+                    'services/gujeuk_pm/concurrency.py', 'services/gujeuk_pm/hermes_patches.py',
+                    'services/gujeuk_pm/discord_mentions.py', 'uv.lock')
+    inputs = ('src', 'services/gujeuk_pm/collector.py', 'services/gujeuk_pm/plugin',
+              'services/gujeuk_pm/agent-skill', 'scripts/gateway_policy.py', 'compose.single.yaml')
+    old = previous.get('services', {}).get('hermes', {})
+    single = previous.get('topology') == 'single'
+    digest = fingerprint(release, image_inputs)
+    old_image = previous.get('images', {}).get('hermes', {})
+    build = force or not single or old_image.get('fingerprint') != digest
+    image = 'gujeuk-pm-hermes:' + release.name if build else old_image['image']
+    content = fingerprint(release, inputs)
+    changed = build or old.get('fingerprint') != content or not Path(old.get('release', '')).is_dir()
+    service = {'release': str(release) if changed else old['release'],
+               'fingerprint': content, 'image': image}
+    return {'topology': 'single', 'images': {'hermes': {'image': image, 'fingerprint': digest}},
+            'services': {'hermes': service}, 'builds': ['hermes'] if build else [],
+            'targets': ['hermes'] if changed else []}

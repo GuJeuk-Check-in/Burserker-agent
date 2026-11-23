@@ -42,9 +42,11 @@ def gateway_status():
 def gateway_idle():
     try:
         status=gateway_status()
-        wiki=run(['systemctl','show','burserker-wiki.service','-p','ActiveState','--value'],
-                 capture_output=True,text=True,timeout=5).stdout.strip()
-        return type(status['active']) is int and status['active']==0 and wiki in {'inactive','failed'}
+        jobs = [run(['systemctl','show',name,'-p','ActiveState','--value'],
+                    capture_output=True,text=True,timeout=5).stdout.strip()
+                for name in ('burserker-wiki.service', 'gujeuk-pm-analysis.service', 'gujeuk-pm-backup.service')]
+        return (type(status['active']) is int and status['active']==0
+                and all(state in {'inactive','failed'} for state in jobs))
     except (subprocess.SubprocessError,ValueError,KeyError,OSError):
         return False
 
@@ -113,6 +115,11 @@ def main():
         plan=make_plan(release,previous,force_worker=args.build_worker)
         print(json.dumps({'revision':args.revision,'rollout_plan':plan}),flush=True)
         if args.plan:return
+        if plan.get('topology') == 'single':
+            from single_deploy import deploy_single
+            deploy_single(release, previous, plan, base=BASE, run=run,
+                          idle=gateway_idle, ready=wait_ready)
+            return
         image=plan['images']['hermes']['image']
         worker_image=plan['images']['worker']['image']
         if plan['targets'] and shutil.disk_usage(BASE).free<2*1024**3:

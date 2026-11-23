@@ -25,6 +25,15 @@ jobs:
         run: docker build -f services/gujeuk_pm/Dockerfile -t burserker-worker-ci .
       - name: Verify pinned Hermes compatibility patches
         run: docker build -f services/gujeuk_pm/Dockerfile.hermes -t burserker-hermes-ci .
+      - name: Build consolidated gateway and isolated browser environment
+        run: docker build -f services/gujeuk_pm/Dockerfile.single -t burserker-single-ci .
+      - name: Verify single-image browser and unchanged SDK contracts
+        run: |
+          docker run --rm --network none --entrypoint /opt/pm/bin/python burserker-single-ci -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); b=p.chromium.launch(headless=True); assert b.new_page().evaluate('1+1')==2; b.close(); p.stop()"
+          docker run --rm --network none --entrypoint /opt/hermes/.venv/bin/python burserker-single-ci -c "from gateway.session import SessionSource; from gateway.config import Platform; s=SessionSource(platform=Platform.DISCORD,chat_id='10',request_lane='123'); assert SessionSource.from_dict(s.to_dict()).request_lane=='123'"
+          docker run -d --name single-smoke --network none -e BURSERKER_WORKERS_ENABLED=0 burserker-single-ci sleep 60
+          docker exec single-smoke /opt/hermes/.venv/bin/python -c "from pathlib import Path; import time; deadline=time.monotonic()+30; p=Path('/run/service/pm-workers'); exec('while not p.exists() and time.monotonic()<deadline: time.sleep(0.2)'); assert p.exists(); assert Path('/proc/1/comm').read_text().strip()!='tini'"
+          docker stop single-smoke
       - name: Test actual session serialization in the patched image
         run: >-
           docker run --rm --network none --entrypoint /opt/hermes/.venv/bin/python

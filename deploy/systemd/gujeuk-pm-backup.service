@@ -1,0 +1,9 @@
+[Unit]
+Description=Gujeuk PM verified SQLite snapshots
+After=docker.service
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/gujeuk-pm
+ExecStart=/usr/bin/python3 /home/ubuntu/gujeuk-pm/code/services/gujeuk_pm/maintenance.py backup
+TimeoutStartSec=300

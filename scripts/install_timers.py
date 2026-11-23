@@ -8,7 +8,8 @@ import subprocess
 def main():
     if os.geteuid()!=0:raise SystemExit('Run the one-time unit installation as root')
     root=Path(__file__).resolve().parents[1]
-    for name in ('burserker-deploy.service','burserker-deploy.timer','burserker-wiki.service','burserker-wiki.timer'):
+    for name in ('burserker-deploy.service','burserker-deploy.timer','burserker-wiki.service','burserker-wiki.timer',
+                 'gujeuk-pm-health.service','gujeuk-pm-backup.service'):
         source=root/'deploy/systemd'/name
         target=Path('/etc/systemd/system')/name
         if target.is_symlink():raise ValueError('refusing_symlink_unit')

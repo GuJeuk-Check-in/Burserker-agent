@@ -1,0 +1,4 @@
+#!/command/with-contenv sh
+set -eu
+if [ "${BURSERKER_WORKERS_ENABLED:-1}" = 0 ]; then exec sleep infinity; fi
+exec /opt/hermes/.venv/bin/python /opt/burserker/supervisor.py

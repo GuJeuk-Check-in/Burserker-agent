@@ -1,0 +1,21 @@
+FROM nousresearch/hermes-agent@sha256:667a9dc77f303f6cd6e9ff62ce2c9580563597e09dde07fe5a224375988d6209
+USER root
+COPY services/gujeuk_pm/concurrency.py /opt/hermes/burserker_concurrency.py
+COPY services/gujeuk_pm/hermes_patches.py services/gujeuk_pm/discord_mentions.py /opt/burserker-patches/
+RUN /opt/hermes/.venv/bin/python /opt/burserker-patches/hermes_patches.py --root /opt/hermes
+# Keep PM dependencies out of the pinned Hermes SDK environment.
+COPY uv.lock /opt/burserker/uv.lock
+RUN /opt/hermes/.venv/bin/python -m venv /opt/pm \
+ && /opt/hermes/.venv/bin/python -c "import tomllib;from pathlib import Path;d=tomllib.loads(Path('/opt/burserker/uv.lock').read_text());Path('/opt/burserker/requirements.txt').write_text('\n'.join(p['name']+'=='+p['version'] for p in d['package'] if p['name'] in {'playwright','greenlet','pyee'}))" \
+ && /opt/pm/bin/pip install --no-cache-dir -r /opt/burserker/requirements.txt
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/browsers
+RUN /opt/pm/bin/python -m playwright install --with-deps chromium \
+ && chmod -R a+rX /opt/browsers \
+ && groupadd -g 1002 pmqueue \
+ && groupadd -g 1001 pmreader \
+ && useradd -u 1001 -g pmreader -M -s /usr/sbin/nologin -G pmqueue pmreader \
+ && usermod -aG pmqueue hermes
+COPY services/gujeuk_pm/single/supervisor.py /opt/burserker/supervisor.py
+COPY services/gujeuk_pm/single/s6/ /etc/s6-overlay/s6-rc.d/
+RUN chmod 755 /etc/s6-overlay/s6-rc.d/pm-workers/run
+# The official entrypoint retains PID 1 and supervises the existing gateway.

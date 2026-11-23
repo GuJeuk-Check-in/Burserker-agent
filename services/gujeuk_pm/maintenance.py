@@ -26,8 +26,18 @@ def main():
     parser.add_argument('mode',choices=['health','backup'])
     args=parser.parse_args()
     os.umask(0o077)
-    result=run(COMPOSE+['exec','-T','pm-worker','python','-m','oijwef098234.gujeuk_ai.ops',args.mode,
-         '--state','/state','--discord-state','/discord','--collector','/collector/collector.py'],timeout=300)
+    deployed = ROOT/'deployed.json'
+    single = deployed.is_file() and json.loads(deployed.read_text()).get('topology') == 'single'
+    if single:
+        operation = ['docker','exec','--user','hermes','-e','HOME=/opt/data',
+            '-e','PYTHONPATH=/opt/data/workspace/gujeuk-pm/src','gujeuk-pm-hermes',
+            '/opt/pm/bin/python','-B','-m','oijwef098234.gujeuk_ai.ops',args.mode,
+            '--state','/opt/data/pm-workspace','--discord-state','/opt/data/pm-discord',
+            '--collector','/collector/collector.py']
+    else:
+        operation = COMPOSE+['exec','-T','pm-worker','python','-m','oijwef098234.gujeuk_ai.ops',args.mode,
+            '--state','/state','--discord-state','/discord','--collector','/collector/collector.py']
+    result=run(operation,timeout=300)
     try:
         data=json.loads(result.stdout)
     except (ValueError,TypeError):
@@ -39,13 +49,18 @@ def main():
         print(json.dumps(data))
         return
     issues=data.get('issues',[])
+    if single:
+        supervisor=run(['docker','exec','gujeuk-pm-hermes','/opt/hermes/.venv/bin/python',
+                        '/opt/burserker/supervisor.py','--health'])
+        if supervisor.returncode:
+            issues.append('single:children_not_ready')
     ps=run(COMPOSE+['ps','--format','json','collector','pm-worker','hermes'])
     states={}
     if ps.returncode==0:
         for line in ps.stdout.splitlines():
             row=json.loads(line)
             states[row['Service']]=row.get('State')
-    for name in ('collector','pm-worker','hermes'):
+    for name in (('hermes',) if single else ('collector','pm-worker','hermes')):
         if states.get(name)!='running':
             issues.append(name+':not_running')
     analysis=run(['systemctl','show','gujeuk-pm-analysis.service','-p','ExecMainStatus','--value'])

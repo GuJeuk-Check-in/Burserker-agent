@@ -169,3 +169,21 @@ def test_single_backup_uses_current_container(tmp_path, monkeypatch, capsys):
     assert 'gujeuk-pm-hermes' in calls[0]
     assert '/opt/pm/bin/python' in calls[0]
     assert 'pm-worker' not in calls[0]
+
+
+@pytest.mark.parametrize('build', [False, True])
+def test_space_guard_distinguishes_source_rollout_and_image_build(rollout, monkeypatch, build):
+    base, release, plan, previous = rollout
+    monkeypatch.setattr(deployment.shutil, 'disk_usage', lambda _: SimpleNamespace(free=2*1024**3))
+    monkeypatch.setattr(deployment, 'supervised', lambda *a: None)
+    plan['builds'] = ['hermes'] if build else []
+    def apply():
+        deployment.deploy_single(release, previous, plan, base=base,
+            run=lambda *a, **kw: None, idle=lambda: True, ready=lambda *a, **kw: None)
+    if build:
+        with pytest.raises(ValueError, match='low_disk'):
+            apply()
+        assert json.loads((base/'deployed.json').read_text()) == {'old': True}
+    else:
+        apply()
+        assert json.loads((base/'deployed.json').read_text())['topology'] == 'single'

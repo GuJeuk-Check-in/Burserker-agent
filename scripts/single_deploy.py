@@ -64,7 +64,8 @@ def deploy_single(release, previous, plan, *, base, run, idle, ready):
     if not plan['targets']:
         write_state(base, metadata)
         return
-    if shutil.disk_usage(base).free < 3 * 1024 ** 3:
+    required = (3 if plan['builds'] else 1) * 1024 ** 3
+    if shutil.disk_usage(base).free < required:
         raise ValueError('low_disk_no_automatic_cleanup')
     if not idle():
         print(json.dumps({'deployment': 'deferred_until_gateway_and_wiki_idle'}))

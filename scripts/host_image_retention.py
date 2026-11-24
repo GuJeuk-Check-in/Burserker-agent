@@ -27,7 +27,7 @@ def docker(*args):
 
 def snapshot():
     ids = docker('ps', '-aq', '--no-trunc').split()
-    fmt = '{{.Name}} {{.Id}} {{.Image}} {{.State.Status}} {{.State.StartedAt}} {{.RestartCount}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{json .Mounts}}'
+    fmt = '{{.Name}} {{.Id}} {{.Image}} {{.State.Status}} {{.State.StartedAt}} {{.RestartCount}} {{with index .State "Health"}}{{.Status}}{{else}}none{{end}} {{json .Mounts}}'
     rows = {}
     for line in docker('container', 'inspect', '-f', fmt, *ids).splitlines():
         name, cid, image, status, start, restart, health, mounts = line.split(' ', 7)

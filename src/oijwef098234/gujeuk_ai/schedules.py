@@ -161,6 +161,7 @@ def config_from_reference(store, actor, data, targets):
     if not isinstance(data, dict) or set(data) - {'reference_draft_id', 'policy', 'weekday', 'hour', 'minute'}:
         raise ValueError('invalid_schedule_fields')
     seed, receipt = store.sent_reference(validate_token(data.get('reference_draft_id')), actor)
+    targets.check(seed['channel_id'], reactions=bool(seed['reactions']), read_history=True)
     message = targets.get(f'/channels/{seed["channel_id"]}/messages/{snowflake(receipt["message_id"])}')
     if message.get('content') != seed['content'] or str(message.get('author', {}).get('id')) != targets.me['id']:
         raise ValueError('reference_message_changed')
@@ -220,7 +221,7 @@ def invoke(params, *, context=None, get=discord_get, path='/opt/data/pm-workspac
         if op == 'activate_schedule':
             row = store.owned(ident, actor, origin)
             config = json.loads(row['config'])
-            targets.check(config['channel_id'], reactions=bool(config['reactions']))
+            targets.check(config['channel_id'], reactions=bool(config['reactions']), read_history=True)
             approval = confirm(context, '예약 ' + ident, get)
             store.activate(ident, actor, origin, 'discord:' + approval, time.time())
         elif op == 'cancel_schedule':
@@ -322,7 +323,7 @@ def dispatch(store, workspace, engine, *, get=discord_get, write=discord_write, 
         try:
             authorize('send_message', platform='discord', guild_id=GUILD_ID, actor_id=row['actor'], get=get)
             targets = Targets(row['actor'], get)
-            targets.check(config['channel_id'], reactions=bool(config['reactions']))
+            targets.check(config['channel_id'], reactions=bool(config['reactions']), read_history=True)
             docs = evidence(config, workspace, get, refresh)
             content, citations = generate(config, docs, engine, clock)
             payload = message_data({k: config[k] for k in ('channel_id', 'reactions', 'mention_roles', 'mention_users')} | {'content': content}, targets)
@@ -331,6 +332,7 @@ def dispatch(store, workspace, engine, *, get=discord_get, write=discord_write, 
                 continue
             authorize('send_message', platform='discord', guild_id=GUILD_ID, actor_id=row['actor'], get=get)
             # Fresh permissions after inference; only the original approved mentions can reach transport.
+            Targets(row['actor'], get).check(config['channel_id'], reactions=bool(config['reactions']), read_history=True)
             message_data({k: config[k] for k in ('channel_id', 'reactions', 'mention_roles', 'mention_users')} | {'content': content}, Targets(row['actor'], get))
             elapsed = time.monotonic() - started
             if elapsed > 240 or clock + elapsed - when > 1800:

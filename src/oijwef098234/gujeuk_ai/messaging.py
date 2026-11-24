@@ -84,7 +84,7 @@ class Targets:
         self.bot = get(f'/guilds/{GUILD_ID}/members/{snowflake(self.me["id"])}')
         self.roles = get(f'/guilds/{GUILD_ID}/roles')
 
-    def check(self, ident, *, reactions=False):
+    def check(self, ident, *, reactions=False, read_history=False):
         channel = self.get('/channels/' + snowflake(ident))
         if str(channel.get('id')) != ident or str(channel.get('guild_id')) != GUILD_ID:
             raise AccessDenied('다른 서버나 DM에는 보낼 수 없어요.')
@@ -105,6 +105,8 @@ class Targets:
                         raise AccessDenied('비공개 스레드 참여를 확인할 수 없어요.')
         if not permissions(parent, self.member, self.roles) & VIEW:
             raise AccessDenied('요청자가 볼 수 없는 채널에는 보낼 수 없어요.')
+        if read_history and not permissions(parent, self.member, self.roles) & HISTORY:
+            raise AccessDenied('공지 이력을 안건 근거로 읽으려면 요청자의 메시지 기록 보기 권한도 필요해요.')
         needed = VIEW | HISTORY | (THREAD_SEND if kind in {10, 11, 12} else SEND)
         if reactions:
             needed |= REACT

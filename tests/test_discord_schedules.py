@@ -249,3 +249,17 @@ def test_fresh_notion_replaces_cache_and_failure_stays_explicit(setup):
     assert next(r for r in docs if r['url'] == old['url'])['content'] == '이번 주 확인된 새 일정이에요.'
     docs = s.evidence(config, workspace, fake.get, lambda url: {'documents': [], 'error': 'reader_timeout'})
     assert next(r for r in docs if r['url'] == old['url'])['live_read_failed'] is True
+
+
+@pytest.mark.parametrize('during_generation', [False, True])
+def test_requester_history_rights_separate_from_view_and_bot_rights(setup, during_generation):
+    fake, engine, _, _, _, _ = setup
+    def revoke():
+        fake.channels['456']['permission_overwrites'] = [{'id': '123', 'type': 1, 'allow': '0', 'deny': str(1 << 16)}]
+    if during_generation:
+        engine.hook = revoke
+    else:
+        revoke()
+    assert run(setup)[0]['error'] == 'AccessDenied'
+    assert not fake.calls
+    assert bool(engine.prompts) is during_generation

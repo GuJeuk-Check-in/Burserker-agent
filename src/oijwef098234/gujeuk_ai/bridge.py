@@ -9,9 +9,44 @@ from .reporting import citation_sources
 
 
 def invoke(params, *, runner=subprocess.run):
-    if not isinstance(params, dict) or set(params) - {'op', 'query', 'kind', 'request_id', 'data', 'url'}:
+    if not isinstance(params, dict) or set(params) - {'op', 'query', 'kind', 'provider', 'request_id', 'data', 'url'}:
         raise ValueError('invalid PM tool arguments')
     op = params.get('op', 'status')
+    if op in {'read_public_url', 'search_public_web'}:
+        from .public_research import read_public_url, search_public_web
+        if op == 'read_public_url':
+            if set(params) != {'op', 'url'}:
+                raise ValueError('invalid_public_read_arguments')
+            result = read_public_url(params['url'])
+        else:
+            if set(params) != {'op', 'query'}:
+                raise ValueError('invalid_public_search_arguments')
+            result = search_public_web(params['query'])
+        return {'ok': True, 'result': result, 'untrusted_source_content': True}
+    if op in {'public_menu', 'meal_suggest'}:
+        from .member_guidance import public_menu
+        result = public_menu(params.get('provider', 'all'), params.get('query', ''))
+        if op == 'meal_suggest':
+            result['suggestions'] = []
+            for index in range(2):
+                for page in result['pages']:
+                    if len(page['items']) > index:
+                        item = page['items'][index]
+                        result['suggestions'].append({
+                            'menu': item['menu'], 'price_krw': item['price_krw'],
+                            'price_evidence': item['price_evidence'], 'source_url': page['url'],
+                            'provider': page['name']})
+            result['limits'] += ' 추천은 확인된 메뉴 후보이며 팀 선호·예산·재고를 추정하지 않아요.'
+        return {'ok': True, 'result': result, 'untrusted_source_content': True}
+    if op == 'minutes_draft':
+        query = params.get('query', '회의')
+        kind = params.get('kind', 'discord')
+        if not isinstance(query, str) or not query.strip() or len(query) > 80 or kind not in {'discord', 'notion'}:
+            raise ValueError('invalid_minutes_query')
+        docs = _rpc({'op': 'search', 'data': {'query': query.strip(), 'kind': kind, 'limit': 10}}, runner)
+        data = {'documents': [row | {'content': row.get('content', '')[:6000]} for row in docs],
+                'limits': '회의록 초안 후보 원문이에요. 접근 권한을 걸러낸 뒤 명시적 결정·제안만 초안에 넣어요.'}
+        return {'ok': True, 'result': data, 'untrusted_source_content': True}
     if op in {'prepare_schedule', 'activate_schedule', 'schedules', 'cancel_schedule'}:
         from .schedules import invoke as schedule
         return schedule(params)

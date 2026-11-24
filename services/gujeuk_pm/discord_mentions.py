@@ -1,12 +1,13 @@
-"""Narrow compatibility patch for Hermes' Discord managed-bot-role mentions.
+"""Fail-closed Discord ingress patches for the pinned Hermes adapter.
 
-Only the bot's own managed role counts. User/role authorization, bot-to-bot raw
-mention rules and unrelated role mentions are unchanged. Reapply to a rebuilt
-Hermes image only after the exact upstream method passes the compatibility check.
+The bot's own managed role counts as a mention. In participating bot threads,
+human replies need a direct address, a bot reply target, or recent bot context.
+User/role authorization and bot-to-bot raw mention rules remain upstream gates.
 """
 from __future__ import annotations
 
 import argparse
+import ast
 from datetime import datetime, timezone
 import os
 from pathlib import Path
@@ -36,13 +37,95 @@ NEW = '''    def _self_is_explicitly_mentioned(self, message: Any) -> bool:
         return False
 '''
 
+ADMISSION_METHOD = '''    async def _burserker_admit_bot_thread_reply(self, message: Any) -> bool:
+        """Admit an unmentioned human turn only when it continues a bot exchange."""
+        if (not isinstance(message.channel, discord.Thread)
+                or str(message.channel.id) not in self._threads
+                or self._discord_thread_require_mention()
+                or getattr(message.author, "bot", False)):
+            return True
+
+        content = getattr(message, "content", "") or ""
+        if not self._client or not self._client.user:
+            return False
+        bot_id = str(self._client.user.id)
+        # A reply ping can populate message.mentions without an inline token.
+        # Only the raw token (or this bot's managed role token) is a direct address.
+        if bot_id in self._raw_mentioned_user_ids(message):
+            return True
+        for role in getattr(message, "role_mentions", []) or []:
+            if (getattr(role, "managed", False)
+                    and str(getattr(getattr(role, "tags", None), "bot_id", "")) == bot_id
+                    and f"<@&{role.id}>" in content):
+                return True
+
+        if self._raw_mentioned_user_ids(message) or re.search(r"<@&\\d+>", content):
+            return False
+
+        reference = getattr(message, "reference", None)
+        resolved_mentions = getattr(message, "mentions", []) or []
+        if any(str(getattr(user, "id", "")) != bot_id for user in resolved_mentions):
+            return False
+        if reference is None:
+            if any(str(getattr(user, "id", "")) == bot_id for user in resolved_mentions):
+                return True
+        if reference is not None:
+            target = getattr(reference, "resolved", None)
+            if target is None and getattr(reference, "message_id", None) is not None:
+                try:
+                    target = await message.channel.fetch_message(int(reference.message_id))
+                except Exception:
+                    return False
+            author = getattr(target, "author", None)
+            return author is not None and str(getattr(author, "id", "")) == bot_id
+
+        # A named human address takes precedence over older bot participation.
+        vocative = r"[가-힣]{2,6}(?:아|야|님)"
+        if (re.search(r"^\\s*" + vocative + r"(?=\\s|[,，:：!?]|$)", content)
+                or re.search(r"(?:^|\\s)" + vocative + r"[.!?]?\\s*$", content)):
+            return False
+
+        try:
+            async for prior in message.channel.history(limit=1, before=message):
+                age = (message.created_at - prior.created_at).total_seconds()
+                return (0 <= age <= 1800
+                        and str(getattr(getattr(prior, "author", None), "id", "")) == bot_id)
+        except Exception:
+            return False
+        return False
+
+'''
+
+ADMISSION_CALL = '''        # burserker-bot-thread-admission-v1: decide before any gateway acknowledgement.
+        if not await self._burserker_admit_bot_thread_reply(message):
+            return False
+'''
+
+
+def _add_admission_call(source):
+    if ADMISSION_CALL in source:
+        return source
+    tree = ast.parse(source)
+    methods = [node for node in ast.walk(tree)
+               if isinstance(node, ast.AsyncFunctionDef) and node.name == '_handle_message']
+    if len(methods) != 1 or not methods[0].body or not isinstance(methods[0].body[0], ast.Expr):
+        raise ValueError('Discord handler changed; review admission before patching')
+    doc = methods[0].body[0].value
+    if not isinstance(doc, ast.Constant) or not isinstance(doc.value, str):
+        raise ValueError('Discord handler docstring changed; review admission before patching')
+    lines = source.splitlines(keepends=True)
+    lines.insert(methods[0].body[0].end_lineno, ADMISSION_CALL)
+    return ''.join(lines)
+
 
 def patched_source(source):
-    if NEW in source:
-        return source
-    if source.count(OLD) != 1:
-        raise ValueError('Discord adapter changed; review mention handling before patching')
-    result = source.replace(OLD, NEW, 1)
+    if NEW not in source:
+        if source.count(OLD) != 1:
+            raise ValueError('Discord adapter changed; review mention handling before patching')
+        source = source.replace(OLD, NEW, 1)
+    if ADMISSION_METHOD not in source:
+        source = source.replace(NEW, ADMISSION_METHOD + NEW, 1)
+    result = _add_admission_call(source)
     compile(result, '<discord-adapter>', 'exec')
     return result
 

@@ -7,7 +7,9 @@ from urllib.request import Request, urlopen
 
 GUILD_ID = '1413450780068937790'
 PM_ROLE_IDS = frozenset({'1573296642025595021', '1573296736544493619'})
-READ_OPS = frozenset({'status', 'tasks', 'search', 'read_notion', 'wiki_search', 'wiki_status', 'channels'})
+READ_OPS = frozenset({'status', 'tasks', 'search', 'read_notion', 'wiki_search', 'wiki_status',
+                      'channels', 'public_menu', 'meal_suggest', 'minutes_draft',
+                      'read_public_url', 'search_public_web'})
 WRITE_OPS = frozenset({'create', 'propose', 'prepare_message', 'send_message',
                        'prepare_schedule', 'activate_schedule', 'schedules', 'cancel_schedule'})
 DENIED = '업무 변경은 구즉 PM 또는 법동 PM 역할이 있는 분만 요청할 수 있어요.'

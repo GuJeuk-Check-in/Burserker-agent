@@ -159,6 +159,7 @@ class Workspace(Store):
         return row[0] if row else None
 
     def record_notion_read(self, result):
+        import math
         import time
         url = notion_url(result['requested_url'])
         docs = result.get('documents', [])
@@ -181,7 +182,23 @@ class Workspace(Store):
         with self.db:
             blocked = [e for e in errors if isinstance(e, dict) and e.get('status') == 429]
             if blocked:
-                retry = max(time.time() + 900, max(float(e.get('retry_at') or 0) for e in blocked))
+                retries = []
+                for issue in blocked:
+                    try:
+                        value = float(issue.get('retry_at') or 0)
+                        if math.isfinite(value) and value > time.time():
+                            retries.append(value)
+                    except (TypeError, ValueError, OverflowError):
+                        pass
+                retry = max(retries, default=time.time() + 900)
+                previous = self.db.execute("SELECT value FROM workspace_meta WHERE key='notion_host_retry'").fetchone()
+                if previous:
+                    try:
+                        old = float(previous[0])
+                        if math.isfinite(old):
+                            retry = max(retry, old)
+                    except (TypeError, ValueError, OverflowError):
+                        pass
                 self.db.execute("INSERT OR REPLACE INTO workspace_meta VALUES('notion_host_retry',?)", (str(retry),))
             self.db.execute('UPDATE notion_frontier SET state=?,next_try=?,checked=?,error=? WHERE url=?',
                 ('read' if ok else 'failed', time.time() + (3600 if ok else 900), time.time(),

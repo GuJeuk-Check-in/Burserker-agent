@@ -84,6 +84,21 @@ class WikiWorkspace(Workspace):
                 seq INTEGER PRIMARY KEY, kind TEXT, id TEXT, digest TEXT, entries TEXT, updated TEXT);
             CREATE TABLE IF NOT EXISTS wiki_failures(
                 kind TEXT,id TEXT,digest TEXT,error TEXT,retry_at REAL,PRIMARY KEY(kind,id));
+            CREATE TABLE IF NOT EXISTS wiki_render_epoch(value INTEGER NOT NULL);
+            INSERT INTO wiki_render_epoch(value)
+                SELECT 0 WHERE NOT EXISTS(SELECT 1 FROM wiki_render_epoch);
+            CREATE TRIGGER IF NOT EXISTS wiki_document_insert BEFORE INSERT ON documents
+                WHEN NOT EXISTS(SELECT 1 FROM documents d WHERE d.kind=new.kind AND d.id=new.id AND d.digest=new.digest)
+                BEGIN UPDATE wiki_render_epoch SET value=value+1; END;
+            CREATE TRIGGER IF NOT EXISTS wiki_document_update AFTER UPDATE ON documents
+                WHEN old.digest!=new.digest
+                BEGIN UPDATE wiki_render_epoch SET value=value+1; END;
+            CREATE TRIGGER IF NOT EXISTS wiki_document_delete AFTER DELETE ON documents
+                BEGIN UPDATE wiki_render_epoch SET value=value+1; END;
+            CREATE TRIGGER IF NOT EXISTS wiki_source_insert AFTER INSERT ON wiki_sources
+                BEGIN UPDATE wiki_render_epoch SET value=value+1; END;
+            CREATE TRIGGER IF NOT EXISTS wiki_source_update AFTER UPDATE ON wiki_sources
+                BEGIN UPDATE wiki_render_epoch SET value=value+1; END;
         ''')
         version = self.db.execute("SELECT value FROM workspace_meta WHERE key='wiki_policy_version'").fetchone()
         if version is None or version[0] != POLICY_VERSION:
@@ -179,6 +194,7 @@ def private_write(root, relative, text, *, immutable=False):
 
 
 def render(store, root):
+    root = Path(root)
     groups = defaultdict(list)
     for source, entries, updated in store.wiki_rows():
         for entry in entries:
@@ -206,7 +222,58 @@ def render(store, root):
         f'## [{r[3]}] ingest | {r[1]}:{r[2]} · revision {r[0]}' for r in reversed(history)))
     private_write(root, 'AGENTS.md', POLICY + '\n원본 raw/는 불변, 위키는 파생 자료예요. 누락과 출처 접근권한을 유지하세요.\n')
     private_write(root, 'index.md', '\n'.join(index) + '\n')  # Index published last; startup repairs interrupted exports.
+    # A separate final receipt detects a crash after the DB ack but before the
+    # rendered files are complete. The epoch also notices changed/unpublished
+    # documents even when every source is in retry backoff.
+    paths = ['index.md', 'coverage.json', 'log.md', 'AGENTS.md']
+    for group in {'people'} | {category + 's' for category in CATEGORIES - PERSON}:
+        paths.extend(str(p.relative_to(root)) for p in (root / group).glob('*.md'))
+    hashes = {}
+    for relative in sorted(paths):
+        path = root / relative
+        if path.is_symlink():
+            raise ValueError('wiki_symlink_rejected')
+        hashes[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+    receipt = {'epoch': store.db.execute('SELECT value FROM wiki_render_epoch').fetchone()[0],
+               'files': hashes}
+    private_write(root, 'render-state.json', json.dumps(receipt, sort_keys=True))
     return {'pages': len(groups), **{k: v for k, v in status.items() if k != 'source_coverage'}}
+
+
+def render_current(store, root):
+    """Cheap idle check; a missing, stale, or damaged receipt forces repair."""
+    path = root / 'render-state.json'
+    if root.is_symlink() or path.is_symlink() or not path.is_file():
+        return False
+    try:
+        if path.stat().st_size > 1024 * 1024:
+            return False
+        receipt = json.loads(path.read_text())
+        epoch = store.db.execute('SELECT value FROM wiki_render_epoch').fetchone()[0]
+        if receipt['epoch'] != epoch or not isinstance(receipt['files'], dict) or not {'index.md', 'coverage.json', 'log.md', 'AGENTS.md'} <= set(receipt['files']):
+            return False
+        for relative, digest in receipt['files'].items():
+            if not isinstance(relative, str) or not re.fullmatch(r'(?:index|coverage|log|AGENTS)\.(?:md|json)|(?:people|projects|tasks|decisions|concepts|open_questions)/[0-9a-f]{24}\.md', relative):
+                return False
+            output = root / relative
+            if output.is_symlink() or not output.is_file() or hashlib.sha256(output.read_bytes()).hexdigest() != digest:
+                return False
+        return True
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def refresh_coverage(store, root, status):
+    """Keep collection freshness current without rebuilding source pages."""
+    path = root / 'coverage.json'
+    before = hashlib.sha256(path.read_bytes()).hexdigest()
+    private_write(root, 'coverage.json', json.dumps(status, ensure_ascii=False, indent=2))
+    after = hashlib.sha256(path.read_bytes()).hexdigest()
+    if before != after:
+        marker = root / 'render-state.json'
+        receipt = json.loads(marker.read_text())
+        receipt['files']['coverage.json'] = after
+        private_write(root, 'render-state.json', json.dumps(receipt, sort_keys=True))
 
 
 def compile_source(source, engine):
@@ -255,8 +322,13 @@ def update(store, root, engine, *, batch=8, workers=1, engine_factory=None):
                 failed += 1
     finally:
         if pool:pool.shutdown(wait=True)
+    if not sources and render_current(store, root):
+        status = store.wiki_status()
+        refresh_coverage(store, root, status)
+        return {'updated': 0, 'failed': 0, 'model_calls': 0, 'empty_sources': 0,
+                'render_skipped': True, **{k: v for k, v in status.items() if k != 'source_coverage'}}
     return {'updated': completed, 'failed': failed, 'model_calls':model_calls,
-            'empty_sources':empty_sources, **render(store, root)}
+            'empty_sources':empty_sources, 'render_skipped': False, **render(store, root)}
 
 
 def main():

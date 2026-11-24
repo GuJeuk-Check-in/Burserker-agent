@@ -1,5 +1,5 @@
 name: gujeuk-pm
 version: "1.0.0"
-description: Owner-only Gujeuk collected evidence and approval-only workspace changes
+description: Guild-member read-only research and PM-gated workspace proposals and messages
 provides_tools:
   - gujeuk_pm

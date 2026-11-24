@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+import math
 import os
 from pathlib import PurePosixPath
 import re
@@ -19,13 +21,21 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def notion_id(value):
+    if not isinstance(value, str) or not re.fullmatch(
+            r'(?:[a-fA-F0-9]{32}|[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12})', value):
+        return ''
+    return value.replace('-', '').lower()
+
+
 def page_id(url):
     parsed = urlparse(url)
     selected = parse_qs(parsed.query).get('p', [''])[0]
-    if re.fullmatch(r'[a-f0-9]{32}', selected):
-        return selected
-    match = re.search(r"([a-f0-9]{32})(?:[/?#]|$)", parsed.path.replace("-", ""))
-    return match.group(1) if match else ""
+    if notion_id(selected):
+        return notion_id(selected)
+    segment = parsed.path.rstrip('/').rsplit('/', 1)[-1]
+    match = re.search(r'(?:^|-)([a-fA-F0-9]{32}|[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12})$', segment)
+    return notion_id(match.group(1)) if match else ''
 
 
 def notion_url(url):
@@ -34,13 +44,16 @@ def notion_url(url):
     path_id = page_id(parsed._replace(query='', fragment='').geturl())
     if parsed.scheme != "https" or parsed.netloc != root.netloc or not path_id:
         raise ValueError("공개한 팀 Notion 사이트만 읽을 수 있어요")
-    query = parse_qs(parsed.query)
-    selected = query.get('p', [''])[0]
-    suffix = ''
-    if selected:
-        if not re.fullmatch(r'[a-f0-9]{32}', selected):
-            raise ValueError('invalid selected Notion page')
-        suffix = '?' + urlencode({'p': selected, 'pm': 's'})
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    params = {}
+    for key in ('v', 'p'):
+        if key in query:
+            if len(query[key]) != 1 or not notion_id(query[key][0]):
+                raise ValueError('invalid selected Notion page or view')
+            params[key] = notion_id(query[key][0])
+    if 'p' in params:
+        params['pm'] = 's'
+    suffix = '?' + urlencode(params) if params else ''
     # Preserve the actual published slug. Dropping it invents a different URL.
     return f"https://{root.netloc}{parsed.path.rstrip('/')}" + suffix
 
@@ -105,8 +118,7 @@ def collect_notion(url=NOTION_ROOT, *, max_pages=40, reader=None, start=0, max_s
                     if response is None or response.status >= 400:
                         retry_at = 0
                         if response and response.status == 429:
-                            retry = str(response.headers.get('retry-after', '900'))
-                            retry_at = time.time() + (min(86400, max(1, int(retry))) if retry.isdigit() else 900)
+                            retry_at = notion_retry_at(response.headers.get('retry-after'))
                         raise SourceHTTPError(response.status if response else 0, retry_at)
                     page.wait_for_function("""() =>
                         document.querySelector('.notion-page-content, .notion-collection-view') &&
@@ -167,7 +179,8 @@ def collect_notion(url=NOTION_ROOT, *, max_pages=40, reader=None, start=0, max_s
                 if len(body) > 100000:
                     issues.append({'url': target, 'reason': 'rendered_text_budget_exceeded'})
                 for offset in range(0, min(len(body), 100000), 18000):
-                    ident = page_id(target) + (':' + str(offset) if offset else '')
+                    view = parse_qs(urlparse(target).query).get('v', [''])[0]
+                    ident = page_id(target) + (':v:' + view if view else '') + (':' + str(offset) if offset else '')
                     docs.append(document('notion', ident, target, title, body[offset:offset+18000],
                         links=child_links if offset == 0 else [], content_truncated=len(body) > 100000,
                         chunk_offset=offset, rendered_characters=len(body)))
@@ -199,6 +212,27 @@ class SourceHTTPError(ValueError):
     def __init__(self, status, retry_at: float = 0):
         super().__init__('source_http_' + str(status))
         self.status, self.retry_at = status, retry_at
+
+
+def notion_retry_at(header, *, clock=time.time):
+    """Honor HTTP Retry-After seconds or dates; use a bounded fallback if invalid."""
+    current = clock()
+    if isinstance(header, str):
+        try:
+            delay = float(header)
+            if math.isfinite(delay) and delay >= 0:
+                return current + max(1, delay)
+        except ValueError:
+            pass
+        try:
+            date = parsedate_to_datetime(header)
+            if date.tzinfo is not None:
+                candidate = date.timestamp()
+                if math.isfinite(candidate) and candidate >= current:
+                    return max(current + 1, candidate)
+        except (ValueError, TypeError, OverflowError):
+            pass
+    return current + 900
 
 
 _github_reset = 0

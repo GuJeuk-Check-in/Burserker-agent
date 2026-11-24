@@ -16,6 +16,14 @@ def register(ctx):
             '구즉 업무 자료를 실제 조회해요. 연결 안 됐다고 답하기 전에 status로 수집 상태를 확인하세요. '
             'tasks는 앱 태스크, search는 수집한 Notion/Discord/GitHub/Figma 원문 키워드 검색이에요. '
             'wiki_search는 출처가 있는 누적 업무·인물·명시적 업무/소통 선호 위키 검색, wiki_status는 처리/미처리/실패 수예요. '
+            'public_menu는 정해진 공식 공개 메뉴 페이지 최대 다섯 곳을 읽고, meal_suggest는 확인된 메뉴 후보를 제안해요. '
+            'provider는 all/bbq/mcdonalds/bonif 중 하나예요. query는 다운로드 뒤 로컬에서만 필터하며 웹사이트에 전송하지 않아요. '
+            'search_public_web는 일반 공개 웹 검색이며 query만 외부 검색 서비스에 전송해요. read_public_url은 지정한 공개 HTTPS 페이지를 읽어요. '
+            '팀 내부 업무·사람·회의·상태는 내부 search/wiki_search/read_notion을 먼저 사용하고, 외부 사실·공개 제품·메뉴·문서 조사는 공개 웹을 사용해요. '
+            '내부 원문이나 대화 전문·비밀정보를 공개 검색 query 또는 URL에 넣지 마세요. 검색 스니펫은 원문 확인이 아니므로 중요한 근거는 URL을 열어 확인하세요. '
+            '가격이 원문에서 메뉴와 명확히 연결되지 않으면 가격 미확인으로 답하고 임의 가격을 만들지 마세요. '
+            'minutes_draft는 실제 검색 원문 중 요청자가 볼 수 있는 자료만으로 한국어 회의록 초안을 만들어요. '
+            'kind는 discord 또는 notion이고 query는 회의 키워드예요. 명시된 결정과 제안을 구분하고 각 문장에 출처를 붙여요. '
             '업무/인물 질문은 wiki_search와 원문 search를 함께 확인하고, 인물 성격/민감정보를 추측하지 마세요. '
             'read_notion은 공개 팀 Notion URL을 지금 직접 읽고 본문과 제목 있는 하위 links를 반환해요. '
             'url을 생략하면 자료실 시작점을 읽어요. 문서 위치/명세서 질문에는 read_notion으로 '
@@ -53,9 +61,10 @@ def register(ctx):
         'parameters': {
             'type': 'object', 'additionalProperties': False,
             'properties': {
-                'op': {'type': 'string', 'enum': ['status', 'tasks', 'search', 'read_notion', 'wiki_search', 'wiki_status', 'create', 'propose', 'channels', 'prepare_message', 'send_message', 'prepare_schedule', 'activate_schedule', 'schedules', 'cancel_schedule']},
-                'url': {'type': 'string', 'description': 'read_notion용 공개 magical-sovereign-7b8.notion.site 페이지 URL'},
+                'op': {'type': 'string', 'enum': ['status', 'tasks', 'search', 'read_notion', 'wiki_search', 'wiki_status', 'public_menu', 'meal_suggest', 'minutes_draft', 'search_public_web', 'read_public_url', 'create', 'propose', 'channels', 'prepare_message', 'send_message', 'prepare_schedule', 'activate_schedule', 'schedules', 'cancel_schedule']},
+                'url': {'type': 'string', 'description': 'read_notion용 공개 팀 Notion URL 또는 read_public_url용 공개 HTTPS URL'},
                 'query': {'type': 'string'},
+                'provider': {'type': 'string', 'enum': ['all', 'bbq', 'mcdonalds', 'bonif']},
                 'kind': {'type': 'string', 'enum': ['', 'notion', 'discord', 'github', 'figma']},
                 'request_id': {'type': 'string'},
                 'data': {'type': 'object', 'additionalProperties': True},
@@ -72,7 +81,11 @@ def register(ctx):
             from oijwef098234.gujeuk_ai.access import authorize_session, filter_session_evidence
             from oijwef098234.gujeuk_ai.bridge import invoke
             roles = authorize_session(params.get('op', 'status'))
-            return json.dumps(filter_session_evidence(invoke(params), roles), ensure_ascii=False)
+            result = filter_session_evidence(invoke(params), roles)
+            if params.get('op') == 'minutes_draft':
+                from oijwef098234.gujeuk_ai.member_guidance import draft_minutes
+                result['result'] = draft_minutes(result['result']['documents'])
+            return json.dumps(result, ensure_ascii=False)
         except AccessDenied as error:
             return json.dumps({'ok': False, 'error': 'permission_denied', 'message': str(error)}, ensure_ascii=False)
         except PermissionError:

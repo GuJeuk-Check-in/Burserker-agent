@@ -7,8 +7,8 @@ from urllib.request import Request, urlopen
 
 GUILD_ID = '1413450780068937790'
 PM_ROLE_IDS = frozenset({'1573296642025595021', '1573296736544493619'})
-READ_OPS = frozenset({'status', 'tasks', 'search', 'read_notion', 'wiki_search', 'wiki_status'})
-WRITE_OPS = frozenset({'create', 'propose'})
+READ_OPS = frozenset({'status', 'tasks', 'search', 'read_notion', 'wiki_search', 'wiki_status', 'channels'})
+WRITE_OPS = frozenset({'create', 'propose', 'prepare_message', 'send_message'})
 DENIED = '업무 변경은 구즉 PM 또는 법동 PM 역할이 있는 분만 요청할 수 있어요.'
 
 
@@ -38,8 +38,8 @@ def authorize(op, *, platform, guild_id, actor_id, get=discord_get):
     """Fail closed, rechecking membership/roles for every request, including retries.
 
     Actor/guild must originate in gateway ContextVars, never tool arguments. PM
-    authority permits only workspace draft creation/proposals, not approval,
-    deletion, Notion editing or arbitrary server operations.
+    authority permits workspace drafts/proposals and the separately confirmed
+    guild outbox, not task approval, deletion, Notion editing or server operations.
     """
     if platform != 'discord' or guild_id != GUILD_ID or not actor_id or not actor_id.isdecimal():
         raise AccessDenied('이 도구는 구즉 서버의 팀 업무 질문에만 사용할 수 있어요.')

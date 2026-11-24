@@ -12,6 +12,9 @@ def invoke(params, *, runner=subprocess.run):
     if not isinstance(params, dict) or set(params) - {'op', 'query', 'kind', 'request_id', 'data', 'url'}:
         raise ValueError('invalid PM tool arguments')
     op = params.get('op', 'status')
+    if op in {'channels', 'prepare_message', 'send_message'}:
+        from .messaging import invoke as message
+        return message(params)
     if op == 'read_notion':
         from .notion_reader import request_page
         from .sources import NOTION_ROOT

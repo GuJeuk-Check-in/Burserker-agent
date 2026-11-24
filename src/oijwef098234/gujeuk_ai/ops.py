@@ -44,7 +44,9 @@ def backup(store, discord_store, root):
     target.mkdir(mode=0o700)
     store.backup_to(target/'workspace.db')
     discord_store.backup_to(target/'discord.db')
-    return {'backup': target.name, 'verified_databases': 2}
+    from .messaging import MessageStore
+    outbox = MessageStore.backup_existing(root.parent/'discord-outbox.db', target/'discord-outbox.db')
+    return {'backup': target.name, 'verified_databases': 2 + int(outbox)}
 
 
 def main():

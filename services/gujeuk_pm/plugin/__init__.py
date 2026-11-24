@@ -8,6 +8,8 @@ def register(ctx):
     if path not in sys.path:
         sys.path.insert(0, path)
     from oijwef098234.gujeuk_ai.reporting import REPLY_POLICY
+    from oijwef098234.gujeuk_ai.messaging import DeliveryError
+    from oijwef098234.gujeuk_ai.access import AccessDenied
     schema = {
         'name': 'gujeuk_pm',
         'description': (
@@ -29,11 +31,21 @@ def register(ctx):
             'create/propose에는 새 request_id와 data 객체가 필요하고 재시도 때 같은 ID/내용을 써요. '
             'create data는 title, kind(task/event), major(플러터/백엔드/프론트엔드/디자인), '
             'assignees(문자열배열), status(doing/blocked/done), begins/due(YYYY-MM-DD), note예요. '
-            'propose data는 item_id, version, patch예요. 반드시 tasks로 실제 ID/버전을 먼저 조회해요.'),
+            'propose data는 item_id, version, patch예요. 반드시 tasks로 실제 ID/버전을 먼저 조회해요. '
+            'channels는 구즉 전체 채널/활성 스레드 중 열람·전송 가능한 대상을 반환해요. 채널 이름으로 ID를 추측하지 마세요. '
+            'PM의 공지/메시지 전송 요청에는 prepare_message를 사용해요. request_id와 '
+            'data={channel_id,content,reactions:["⭕","❌"],mention_roles:[],mention_users:[]}이며 '
+            'reactions/멘션은 요청한 경우만 넣어요. 포럼 새 글은 title 및 필요 시 tags도 넣어요. '
+            '반환된 preview의 대상·본문·알림 멘션·반응과 confirmation을 그대로 보여주세요. '
+            '사용자가 같은 대화에 `발송 초안ID`를 단독으로 직접 입력한 뒤에만 '
+            'send_message data={draft_id:초안ID}를 호출해요. 모델이 confirmation을 대신 승인할 수 없어요. '
+            '모든 구즉 메시지 가능 채널을 대상으로 지원하며 다른 서버·DM·everyone/here 알림은 불가해요. '
+            '발송 성공은 반환된 실제 메시지 url로 안내하고, 반응 실패는 전송 실패와 구분해요. '
+            '결과 불명확/중복 방지 오류에는 새 초안을 만들어 재발송하지 말고 먼저 실제 게시 여부를 확인하세요.'),
         'parameters': {
             'type': 'object', 'additionalProperties': False,
             'properties': {
-                'op': {'type': 'string', 'enum': ['status', 'tasks', 'search', 'read_notion', 'wiki_search', 'wiki_status', 'create', 'propose']},
+                'op': {'type': 'string', 'enum': ['status', 'tasks', 'search', 'read_notion', 'wiki_search', 'wiki_status', 'create', 'propose', 'channels', 'prepare_message', 'send_message']},
                 'url': {'type': 'string', 'description': 'read_notion용 공개 magical-sovereign-7b8.notion.site 페이지 URL'},
                 'query': {'type': 'string'},
                 'kind': {'type': 'string', 'enum': ['', 'notion', 'discord', 'github', 'figma']},
@@ -53,10 +65,18 @@ def register(ctx):
             from oijwef098234.gujeuk_ai.bridge import invoke
             roles = authorize_session(params.get('op', 'status'))
             return json.dumps(filter_session_evidence(invoke(params), roles), ensure_ascii=False)
+        except AccessDenied as error:
+            return json.dumps({'ok': False, 'error': 'permission_denied', 'message': str(error)}, ensure_ascii=False)
         except PermissionError:
             return json.dumps({'ok': False, 'error': 'permission_denied',
                                'message': '업무 변경은 구즉 PM 또는 법동 PM 역할이 있는 분만 요청할 수 있어요. '
-                                          '구즉 서버 안에서 질문했는지와 현재 역할을 확인해 주세요.'}, ensure_ascii=False)
+                                          '메시지 발송도 PM만 가능해요. 대상 채널 권한과 직접 입력한 발송 확인 문구도 확인해 주세요.'}, ensure_ascii=False)
+        except DeliveryError as error:
+            return json.dumps({'ok': False, 'error': error.code,
+                               'message': '발송 상태를 확인해 주세요. 결과 불명확이면 재발송하지 말고 실제 게시 여부부터 확인해요.'}, ensure_ascii=False)
+        except ValueError:
+            return json.dumps({'ok': False, 'error': 'invalid_request',
+                               'message': '입력·채널·초안 만료·발송 확인 상태를 확인해 주세요.'}, ensure_ascii=False)
         except Exception as error:
             # Never echo raw documents, invalid user payloads or credentials as errors.
             return json.dumps({'ok': False, 'error': type(error).__name__,

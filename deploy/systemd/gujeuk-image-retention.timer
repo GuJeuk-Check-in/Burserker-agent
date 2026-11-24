@@ -1,0 +1,9 @@
+[Unit]
+Description=Check retired app images every fifteen minutes
+
+[Timer]
+OnBootSec=15min
+OnUnitInactiveSec=15min
+
+[Install]
+WantedBy=timers.target

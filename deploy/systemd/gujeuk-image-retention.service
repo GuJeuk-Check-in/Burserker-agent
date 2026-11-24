@@ -1,0 +1,9 @@
+[Unit]
+Description=Remove retired Gujeuk app images without restarting containers
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /usr/local/lib/gujeuk-image-retention/retention.py --apply
+UMask=0077
+Nice=10

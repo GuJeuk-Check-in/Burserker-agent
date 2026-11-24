@@ -293,32 +293,38 @@ def invoke(params, *, context=None, get=discord_get, write=discord_write,
         except Exception:
             store.finish(token, 'prepared')
             raise
-        ident = payload['channel_id']
-        body = {'content': payload['content'], 'allowed_mentions': payload['allowed_mentions']}
-        try:
-            if payload['forum']:
-                response = write('POST', f'/channels/{ident}/threads',
-                                 {'name': payload['title'], 'message': body, 'applied_tags': payload['tags']})
-                ident, sent = snowflake(response['id']), response['message']
-            else:
-                sent = write('POST', f'/channels/{ident}/messages', body | {'nonce': token, 'enforce_nonce': True})
-            message_id = snowflake(sent['id'])
-            confirmed = get(f'/channels/{ident}/messages/{message_id}')
-            if (str(confirmed.get('author', {}).get('id')) != targets.me['id'] or confirmed.get('content') != payload['content']):
-                raise DeliveryError('readback_not_confirmed')
-            receipt = {'message_id': message_id, 'channel_id': ident,
-                'url': f'https://discord.com/channels/{GUILD_ID}/{ident}/{message_id}', 'reaction_errors': []}
-        except Exception:
-            store.finish(token, 'unknown')
-            raise DeliveryError('delivery_outcome_uncertain_do_not_resend') from None
-        # Commit send receipt before reactions; reaction failure never repeats the POST.
-        store.finish(token, 'sent', receipt)
-        for emoji in payload['reactions']:
-            try:
-                write('PUT', f'/channels/{ident}/messages/{message_id}/reactions/{quote(emoji, safe="")}/@me')
-            except Exception:
-                receipt['reaction_errors'].append(emoji)
-        store.finish(token, 'sent', receipt)
+        receipt = deliver(payload, token, targets, get=get, write=write,
+                          finish=lambda state, receipt=None: store.finish(token, state, receipt))
         return {'ok': True, 'result': receipt}
     finally:
         store.close()
+
+
+def deliver(payload, token, targets, *, get, write, finish):
+    """Internal transport after caller's persistent reservation and authorization."""
+    ident = payload['channel_id']
+    body = {'content': payload['content'], 'allowed_mentions': payload['allowed_mentions']}
+    try:
+        if payload['forum']:
+            response = write('POST', f'/channels/{ident}/threads',
+                             {'name': payload['title'], 'message': body, 'applied_tags': payload['tags']})
+            ident, sent = snowflake(response['id']), response['message']
+        else:
+            sent = write('POST', f'/channels/{ident}/messages', body | {'nonce': token, 'enforce_nonce': True})
+        message_id = snowflake(sent['id'])
+        confirmed = get(f'/channels/{ident}/messages/{message_id}')
+        if (str(confirmed.get('author', {}).get('id')) != targets.me['id'] or confirmed.get('content') != payload['content']):
+            raise DeliveryError('readback_not_confirmed')
+        receipt = {'message_id': message_id, 'channel_id': ident,
+            'url': f'https://discord.com/channels/{GUILD_ID}/{ident}/{message_id}', 'reaction_errors': []}
+    except Exception:
+        finish('unknown')
+        raise DeliveryError('delivery_outcome_uncertain_do_not_resend') from None
+    finish('sent', receipt)
+    for emoji in payload['reactions']:
+        try:
+            write('PUT', f'/channels/{ident}/messages/{message_id}/reactions/{quote(emoji, safe="")}/@me')
+        except Exception:
+            receipt['reaction_errors'].append(emoji)
+    finish('sent', receipt)
+    return receipt

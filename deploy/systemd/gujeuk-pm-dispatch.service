@@ -1,0 +1,8 @@
+[Unit]
+Description=Dispatch approved weekly PM notices (no generic model tools)
+After=docker.service
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/usr/bin/docker exec --user hermes -e HOME=/opt/data -e PYTHONPATH=/opt/data/workspace/gujeuk-pm/src:/opt/hermes:/opt/hermes/.venv/lib/python3.14/site-packages gujeuk-pm-hermes /usr/bin/timeout --signal=TERM --kill-after=15s 240s /opt/hermes/.venv/bin/python -B -m oijwef098234.gujeuk_ai.schedules dispatch --state /opt/data/pm-workspace
+TimeoutStartSec=270

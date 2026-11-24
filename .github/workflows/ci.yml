@@ -29,6 +29,7 @@ jobs:
         run: docker build -f services/gujeuk_pm/Dockerfile.single -t burserker-single-ci .
       - name: Verify single-image browser and unchanged SDK contracts
         run: |
+          docker run --rm --network none --entrypoint /opt/hermes/.venv/bin/python burserker-single-ci -c "from pathlib import Path; from zoneinfo import ZoneInfo; assert ZoneInfo('Asia/Seoul'); assert Path('/usr/bin/timeout').is_file()"
           docker run --rm --network none --entrypoint /opt/pm/bin/python burserker-single-ci -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); b=p.chromium.launch(headless=True); assert b.new_page().evaluate('1+1')==2; b.close(); p.stop()"
           docker run --rm --network none --entrypoint /opt/hermes/.venv/bin/python burserker-single-ci -c "from gateway.session import SessionSource; from gateway.config import Platform; s=SessionSource(platform=Platform.DISCORD,chat_id='10',request_lane='123'); assert SessionSource.from_dict(s.to_dict()).request_lane=='123'"
           docker run --rm --network none --entrypoint /opt/hermes/.venv/bin/python burserker-single-ci -c "from gateway.session_context import set_session_vars,get_session_env,clear_session_vars; t=set_session_vars(platform='discord',scope_id='1413450780068937790',actor_id='42',chat_id='10',thread_id='11',message_id='12'); assert get_session_env('HERMES_SESSION_MESSAGE_ID')=='12'; assert get_session_env('HERMES_SESSION_ACTOR_ID')=='42'; clear_session_vars(t)"

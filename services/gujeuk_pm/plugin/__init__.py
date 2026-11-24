@@ -41,11 +41,19 @@ def register(ctx):
             'send_message data={draft_id:초안ID}를 호출해요. 모델이 confirmation을 대신 승인할 수 없어요. '
             '모든 구즉 메시지 가능 채널을 대상으로 지원하며 다른 서버·DM·everyone/here 알림은 불가해요. '
             '발송 성공은 반환된 실제 메시지 url로 안내하고, 반응 실패는 전송 실패와 구분해요. '
-            '결과 불명확/중복 방지 오류에는 새 초안을 만들어 재발송하지 말고 먼저 실제 게시 여부를 확인하세요.'),
+            '결과 불명확/중복 방지 오류에는 새 초안을 만들어 재발송하지 말고 먼저 실제 게시 여부를 확인하세요. '
+            '주간 회의 자동 공지는 예약 기능을 지원해요. schedules로 본인 예약과 recent_messages의 발송 초안 ID를 조회해요. '
+            'prepare_schedule은 request_id와 data={reference_draft_id:기존발송초안ID,policy:안건작성원칙,weekday:1,hour:12,minute:0}예요. '
+            'weekday는 월0~일6, 시간은 Asia/Seoul이며 기본은 매주 화요일 낮12시예요. '
+            '기존 공지의 멘션·회의안내·반응을 유지하고, 실행할 때 과거 공지/날짜·공개 Notion/코드 근거로 안건을 새로 고르며 마지막은 기타의견이에요. '
+            '고정 대상·시간·안건 정책 preview를 보여주고, 사용자가 같은 대화에 `예약 예약ID`를 직접 입력하면 '
+            'activate_schedule data={schedule_id:예약ID}로 활성화해요. 한 번 예약 승인 후 매회 발송 승인은 불필요해요. '
+            '사용자가 `예약중지 예약ID`를 직접 입력하면 cancel_schedule data={schedule_id:예약ID}로 중지해요. '
+            '예약 활성화 성공은 실제 반환 next_run으로만 안내하세요. 예약 도구가 없다고 단정하거나 대화로 약속만 하지 마세요.'),
         'parameters': {
             'type': 'object', 'additionalProperties': False,
             'properties': {
-                'op': {'type': 'string', 'enum': ['status', 'tasks', 'search', 'read_notion', 'wiki_search', 'wiki_status', 'create', 'propose', 'channels', 'prepare_message', 'send_message']},
+                'op': {'type': 'string', 'enum': ['status', 'tasks', 'search', 'read_notion', 'wiki_search', 'wiki_status', 'create', 'propose', 'channels', 'prepare_message', 'send_message', 'prepare_schedule', 'activate_schedule', 'schedules', 'cancel_schedule']},
                 'url': {'type': 'string', 'description': 'read_notion용 공개 magical-sovereign-7b8.notion.site 페이지 URL'},
                 'query': {'type': 'string'},
                 'kind': {'type': 'string', 'enum': ['', 'notion', 'discord', 'github', 'figma']},

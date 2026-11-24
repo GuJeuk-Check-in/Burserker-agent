@@ -1,0 +1,9 @@
+[Unit]
+Description=Check approved PM notice due times each minute
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+Persistent=false
+Unit=gujeuk-pm-dispatch.service
+[Install]
+WantedBy=timers.target
